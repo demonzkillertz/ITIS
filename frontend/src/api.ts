@@ -65,6 +65,23 @@ type ApiServerImportResult = {
   }>;
 };
 
+type ApiServerScanResult = {
+  parent_dir?: string | null;
+  image_dir?: string | null;
+  video_dir?: string | null;
+  label_dir?: string | null;
+  image_count: number;
+  video_count: number;
+  label_count: number;
+  matched_label_count: number;
+  missing_label_count: number;
+  issues: Array<{
+    path: string;
+    issue_type: string;
+    message: string;
+  }>;
+};
+
 type ApiImportHistoryItem = {
   id: string;
   dataset_id: string;
@@ -162,22 +179,107 @@ export async function importServerFolder(
   sampleEverySeconds: number,
   autoAnnotate: boolean
 ) {
-  const result = await request<ApiServerImportResult>(`/api/media/${datasetId}/server-folder`, {
+  return importFolderAt(`/api/media/${datasetId}/server-folder`, {
+    parentDir,
+    imageDir,
+    videoDir,
+    labelDir,
+    task,
+    mode,
+    duplicatePolicy,
+    importImages,
+    importVideos,
+    extractVideoFrames,
+    sampleEverySeconds,
+    autoAnnotate
+  });
+}
+
+export async function importImageFolder(
+  datasetId: string,
+  parentDir: string,
+  imageDir: string,
+  labelDir: string,
+  task: AnnotationTask,
+  mode: "auto" | "explicit",
+  duplicatePolicy: "skip" | "import_copy",
+  autoAnnotate: boolean
+) {
+  return importFolderAt(`/api/media/${datasetId}/image-folder/import`, {
+    parentDir,
+    imageDir,
+    videoDir: "",
+    labelDir,
+    task,
+    mode,
+    duplicatePolicy,
+    importImages: true,
+    importVideos: false,
+    extractVideoFrames: false,
+    sampleEverySeconds: 1,
+    autoAnnotate
+  });
+}
+
+export async function importVideoFolder(
+  datasetId: string,
+  parentDir: string,
+  videoDir: string,
+  task: AnnotationTask,
+  mode: "auto" | "explicit",
+  duplicatePolicy: "skip" | "import_copy",
+  extractVideoFrames: boolean,
+  sampleEverySeconds: number,
+  autoAnnotate: boolean
+) {
+  return importFolderAt(`/api/media/${datasetId}/video-folder/import`, {
+    parentDir,
+    imageDir: "",
+    videoDir,
+    labelDir: "",
+    task,
+    mode,
+    duplicatePolicy,
+    importImages: false,
+    importVideos: true,
+    extractVideoFrames,
+    sampleEverySeconds,
+    autoAnnotate
+  });
+}
+
+type FolderPayload = {
+  parentDir: string;
+  imageDir: string;
+  videoDir: string;
+  labelDir: string;
+  task: AnnotationTask;
+  mode: "auto" | "explicit";
+  duplicatePolicy: "skip" | "import_copy";
+  importImages: boolean;
+  importVideos: boolean;
+  extractVideoFrames: boolean;
+  sampleEverySeconds: number;
+  autoAnnotate: boolean;
+};
+
+async function importFolderAt(path: string, payload: FolderPayload) {
+  const result = await request<ApiServerImportResult>(path, {
     method: "POST",
     body: JSON.stringify({
-      parent_dir: parentDir.trim() ? parentDir : null,
-      image_dir: imageDir.trim() ? imageDir : null,
-      video_dir: videoDir.trim() ? videoDir : null,
-      label_dir: labelDir.trim() ? labelDir : null,
-      task: task,
-      mode: mode,
-      duplicate_policy: duplicatePolicy,
-      source_type: importImages && importVideos ? "mixed_folder" : importVideos ? "video_folder" : "image_folder",
-      import_images: importImages,
-      import_videos: importVideos,
-      extract_video_frames: extractVideoFrames,
-      video_sample_every_seconds: sampleEverySeconds,
-      auto_annotate: autoAnnotate
+      parent_dir: payload.parentDir.trim() ? payload.parentDir : null,
+      image_dir: payload.imageDir.trim() ? payload.imageDir : null,
+      video_dir: payload.videoDir.trim() ? payload.videoDir : null,
+      label_dir: payload.labelDir.trim() ? payload.labelDir : null,
+      task: payload.task,
+      mode: payload.mode,
+      duplicate_policy: payload.duplicatePolicy,
+      source_type: payload.importImages && payload.importVideos ? "mixed_folder" : payload.importVideos ? "video_folder" : "image_folder",
+      import_images: payload.importImages,
+      import_videos: payload.importVideos,
+      extract_video_frames: payload.extractVideoFrames,
+      video_sample_every_seconds: payload.sampleEverySeconds,
+      auto_annotate: payload.autoAnnotate
     })
   });
 
@@ -201,6 +303,111 @@ export async function importServerFolder(
       parentMediaId: item.parent_media_id ?? undefined
     }))
   };
+}
+
+export async function scanServerFolder(
+  datasetId: string,
+  parentDir: string,
+  imageDir: string,
+  videoDir: string,
+  labelDir: string,
+  task: AnnotationTask,
+  mode: "auto" | "explicit",
+  duplicatePolicy: "skip" | "import_copy",
+  importImages: boolean,
+  importVideos: boolean,
+  extractVideoFrames: boolean,
+  sampleEverySeconds: number,
+  autoAnnotate: boolean
+) {
+  return scanFolderAt(`/api/media/${datasetId}/server-folder/scan`, {
+    parentDir,
+    imageDir,
+    videoDir,
+    labelDir,
+    task,
+    mode,
+    duplicatePolicy,
+    importImages,
+    importVideos,
+    extractVideoFrames,
+    sampleEverySeconds,
+    autoAnnotate
+  });
+}
+
+export async function scanImageFolder(
+  datasetId: string,
+  parentDir: string,
+  imageDir: string,
+  labelDir: string,
+  task: AnnotationTask,
+  mode: "auto" | "explicit",
+  duplicatePolicy: "skip" | "import_copy",
+  autoAnnotate: boolean
+) {
+  return scanFolderAt(`/api/media/${datasetId}/image-folder/scan`, {
+    parentDir,
+    imageDir,
+    videoDir: "",
+    labelDir,
+    task,
+    mode,
+    duplicatePolicy,
+    importImages: true,
+    importVideos: false,
+    extractVideoFrames: false,
+    sampleEverySeconds: 1,
+    autoAnnotate
+  });
+}
+
+export async function scanVideoFolder(
+  datasetId: string,
+  parentDir: string,
+  videoDir: string,
+  task: AnnotationTask,
+  mode: "auto" | "explicit",
+  duplicatePolicy: "skip" | "import_copy",
+  extractVideoFrames: boolean,
+  sampleEverySeconds: number,
+  autoAnnotate: boolean
+) {
+  return scanFolderAt(`/api/media/${datasetId}/video-folder/scan`, {
+    parentDir,
+    imageDir: "",
+    videoDir,
+    labelDir: "",
+    task,
+    mode,
+    duplicatePolicy,
+    importImages: false,
+    importVideos: true,
+    extractVideoFrames,
+    sampleEverySeconds,
+    autoAnnotate
+  });
+}
+
+function scanFolderAt(path: string, payload: FolderPayload) {
+  return request<ApiServerScanResult>(path, {
+    method: "POST",
+    body: JSON.stringify({
+      parent_dir: payload.parentDir.trim() ? payload.parentDir : null,
+      image_dir: payload.imageDir.trim() ? payload.imageDir : null,
+      video_dir: payload.videoDir.trim() ? payload.videoDir : null,
+      label_dir: payload.labelDir.trim() ? payload.labelDir : null,
+      task: payload.task,
+      mode: payload.mode,
+      duplicate_policy: payload.duplicatePolicy,
+      source_type: payload.importImages && payload.importVideos ? "mixed_folder" : payload.importVideos ? "video_folder" : "image_folder",
+      import_images: payload.importImages,
+      import_videos: payload.importVideos,
+      extract_video_frames: payload.extractVideoFrames,
+      video_sample_every_seconds: payload.sampleEverySeconds,
+      auto_annotate: payload.autoAnnotate
+    })
+  });
 }
 
 export async function listImportHistory(datasetId: string): Promise<ImportHistoryItem[]> {

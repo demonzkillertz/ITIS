@@ -147,6 +147,19 @@ class ServerFolderImportRead(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ServerFolderScanRead(BaseModel):
+    parent_dir: str | None = None
+    image_dir: str | None = None
+    video_dir: str | None = None
+    label_dir: str | None = None
+    image_count: int = 0
+    video_count: int = 0
+    label_count: int = 0
+    matched_label_count: int = 0
+    missing_label_count: int = 0
+    issues: list[ImportIssue] = Field(default_factory=list)
+
+
 class ImportSessionRead(BaseModel):
     id: UUID
     dataset_id: UUID

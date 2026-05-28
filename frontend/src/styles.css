@@ -104,6 +104,245 @@ h2 {
   min-height: calc(100vh - 76px);
 }
 
+.home-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.dashboard-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.dashboard-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #cbd5e1;
+  background: #121b2a;
+  white-space: nowrap;
+}
+
+.dashboard-tabs button.active {
+  border-color: #38bdf8;
+  color: #f8fafc;
+  background: #075985;
+}
+
+.annotation-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 220px;
+  min-height: calc(100vh - 76px);
+}
+
+.import-surface,
+.gallery-surface,
+.dashboard-surface,
+.history-surface {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #243244;
+  border-radius: 8px;
+  background: #121b2a;
+}
+
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dashboard-hero button {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 8px;
+  min-height: 130px;
+  padding: 14px;
+  border: 1px solid #2f3f54;
+  border-radius: 8px;
+  color: #dbeafe;
+  background: #182233;
+  text-align: left;
+}
+
+.dashboard-hero button:hover {
+  border-color: #38bdf8;
+}
+
+.dashboard-hero strong {
+  color: #f8fafc;
+}
+
+.dashboard-hero span,
+.workflow-note {
+  color: #9fb2c8;
+}
+
+.workflow-note {
+  margin-bottom: 14px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.import-grid label {
+  display: grid;
+  gap: 6px;
+  color: #dbeafe;
+  font-size: 0.82rem;
+}
+
+.import-grid input,
+.import-grid select {
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #e5eef7;
+  background: #0d141f;
+}
+
+.option-strip,
+.action-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.option-strip label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  color: #dbeafe;
+}
+
+.option-strip input {
+  width: 16px;
+  height: 16px;
+  accent-color: #38bdf8;
+}
+
+.action-row button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+  color: #e0f2fe;
+  background: #075985;
+}
+
+.action-row span {
+  min-width: 0;
+  color: #9fb2c8;
+}
+
+.scan-summary,
+.home-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.scan-summary div,
+.home-stats div,
+.metric-row {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #2f3f54;
+  border-radius: 6px;
+  background: #182233;
+}
+
+.scan-summary span,
+.home-stats span,
+.metric-row span {
+  display: block;
+  color: #9fb2c8;
+  font-size: 0.74rem;
+}
+
+.scan-summary strong,
+.home-stats strong,
+.metric-row strong {
+  display: block;
+  margin-top: 4px;
+  color: #f8fafc;
+  font-size: 1.2rem;
+}
+
+.home-gallery {
+  margin-top: 14px;
+  min-height: 560px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.history-surface {
+  align-self: start;
+  display: grid;
+  gap: 8px;
+}
+
+.history-surface h2 {
+  margin-bottom: 4px;
+}
+
+.history-surface p,
+.empty-gallery {
+  color: #8fa3ba;
+}
+
+.empty-gallery {
+  display: grid;
+  place-items: center;
+  min-height: 240px;
+  border: 1px solid #2c3b50;
+  border-radius: 8px;
+  background: #070b11;
+}
+
+.annotation-stage {
+  min-width: 0;
+  padding: 18px;
+}
+
+.annotation-review {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
 .left-panel,
 .review-panel {
   padding: 16px;
@@ -407,6 +646,15 @@ h2 {
 }
 
 @media (max-width: 980px) {
+  .home-layout,
+  .annotation-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-hero {
+    grid-template-columns: 1fr;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -419,6 +667,10 @@ h2 {
 
   .class-list {
     grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .import-grid {
+    grid-template-columns: 1fr;
   }
 }
 

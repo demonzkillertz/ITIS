@@ -23,6 +23,7 @@ from app.domain.schemas import (
     ProcessingJobRead,
     ServerFolderImportCreate,
     ServerFolderImportRead,
+    ServerFolderScanRead,
 )
 from app.services.yolo_labels import YoloLabelError, parse_label_file
 
@@ -211,6 +212,144 @@ def import_server_folder(
     report.created_at = import_session.created_at
     report.media = [media_to_read(item) for item in saved_items]
     return report
+
+
+@router.post("/{dataset_id}/server-folder/scan", response_model=ServerFolderScanRead)
+def scan_server_folder(
+    dataset_id: UUID,
+    payload: ServerFolderImportCreate,
+    db: Session = Depends(get_db),
+) -> ServerFolderScanRead:
+    ensure_dataset(db, dataset_id)
+    image_dir, video_dir, label_dir, parent_dir = resolve_import_paths(payload)
+    report = ServerFolderScanRead(
+        parent_dir=str(parent_dir) if parent_dir else None,
+        image_dir=str(image_dir) if image_dir else None,
+        video_dir=str(video_dir) if video_dir else None,
+        label_dir=str(label_dir) if label_dir else None,
+    )
+
+    image_paths: list[Path] = []
+    if payload.import_images:
+        if image_dir is None or not image_dir.is_dir():
+            report.issues.append(
+                ImportIssue(
+                    path=str(image_dir) if image_dir else "",
+                    issue_type="missing_image_folder",
+                    message="Image folder does not exist on server.",
+                )
+            )
+        else:
+            image_paths = [
+                path
+                for path in image_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+            ]
+            report.image_count = len(image_paths)
+
+    if payload.import_videos:
+        if video_dir is None or not video_dir.is_dir():
+            report.issues.append(
+                ImportIssue(
+                    path=str(video_dir) if video_dir else "",
+                    issue_type="missing_video_folder",
+                    message="Video folder does not exist on server.",
+                )
+            )
+        else:
+            report.video_count = sum(
+                1
+                for path in video_dir.rglob("*")
+                if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+            )
+
+    if label_dir is not None:
+        if not label_dir.is_dir():
+            report.issues.append(
+                ImportIssue(
+                    path=str(label_dir),
+                    issue_type="missing_label_folder",
+                    message="Label folder does not exist on server.",
+                )
+            )
+        else:
+            label_stems = {
+                path.stem
+                for path in label_dir.rglob("*.txt")
+                if path.is_file()
+            }
+            image_stems = {path.stem for path in image_paths}
+            report.label_count = len(label_stems)
+            report.matched_label_count = len(image_stems & label_stems)
+            report.missing_label_count = max(0, len(image_stems - label_stems))
+
+    return report
+
+
+@router.post("/{dataset_id}/image-folder/scan", response_model=ServerFolderScanRead)
+def scan_image_folder(
+    dataset_id: UUID,
+    payload: ServerFolderImportCreate,
+    db: Session = Depends(get_db),
+) -> ServerFolderScanRead:
+    image_payload = payload.model_copy(
+        update={
+            "source_type": ImportSourceType.IMAGE_FOLDER,
+            "import_images": True,
+            "import_videos": False,
+            "extract_video_frames": False,
+        }
+    )
+    return scan_server_folder(dataset_id, image_payload, db)
+
+
+@router.post("/{dataset_id}/image-folder/import", response_model=ServerFolderImportRead)
+def import_image_folder(
+    dataset_id: UUID,
+    payload: ServerFolderImportCreate,
+    db: Session = Depends(get_db),
+) -> ServerFolderImportRead:
+    image_payload = payload.model_copy(
+        update={
+            "source_type": ImportSourceType.IMAGE_FOLDER,
+            "import_images": True,
+            "import_videos": False,
+            "extract_video_frames": False,
+        }
+    )
+    return import_server_folder(dataset_id, image_payload, db)
+
+
+@router.post("/{dataset_id}/video-folder/scan", response_model=ServerFolderScanRead)
+def scan_video_folder(
+    dataset_id: UUID,
+    payload: ServerFolderImportCreate,
+    db: Session = Depends(get_db),
+) -> ServerFolderScanRead:
+    video_payload = payload.model_copy(
+        update={
+            "source_type": ImportSourceType.VIDEO_FOLDER,
+            "import_images": False,
+            "import_videos": True,
+        }
+    )
+    return scan_server_folder(dataset_id, video_payload, db)
+
+
+@router.post("/{dataset_id}/video-folder/import", response_model=ServerFolderImportRead)
+def import_video_folder(
+    dataset_id: UUID,
+    payload: ServerFolderImportCreate,
+    db: Session = Depends(get_db),
+) -> ServerFolderImportRead:
+    video_payload = payload.model_copy(
+        update={
+            "source_type": ImportSourceType.VIDEO_FOLDER,
+            "import_images": False,
+            "import_videos": True,
+        }
+    )
+    return import_server_folder(dataset_id, video_payload, db)
 
 
 @router.post("/{dataset_id}/videos", response_model=ProcessingJobRead)
