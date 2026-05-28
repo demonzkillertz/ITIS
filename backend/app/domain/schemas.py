@@ -125,6 +125,8 @@ class ServerFolderImportCreate(BaseModel):
     extract_video_frames: bool = True
     video_sample_every_seconds: float = Field(default=1.0, gt=0)
     auto_annotate: bool = False
+    vehicle_model_key: str | None = None
+    plate_model_key: str | None = None
 
 
 class ServerFolderImportRead(BaseModel):
@@ -158,6 +160,36 @@ class ServerFolderScanRead(BaseModel):
     matched_label_count: int = 0
     missing_label_count: int = 0
     issues: list[ImportIssue] = Field(default_factory=list)
+
+
+class FrameExtractionCreate(BaseModel):
+    sample_every_seconds: float = Field(default=1.0, gt=0)
+    auto_annotate: bool = False
+    task: AnnotationTask = AnnotationTask.VEHICLE
+    tasks: list[AnnotationTask] | None = None
+    vehicle_model_key: str | None = None
+    plate_model_key: str | None = None
+
+
+class ModelOptionRead(BaseModel):
+    key: str
+    label: str
+    task: AnnotationTask | None = None
+    family: str
+    file_name: str
+    path: str | None = None
+    is_custom: bool = False
+    is_downloaded: bool = False
+
+
+class ModelCatalogRead(BaseModel):
+    vehicle_default: str
+    plate_default: str
+    models: list[ModelOptionRead]
+
+
+class ModelDownloadCreate(BaseModel):
+    keys: list[str] | None = None
 
 
 class ImportSessionRead(BaseModel):

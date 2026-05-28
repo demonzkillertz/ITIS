@@ -16,13 +16,17 @@ import {
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  autoAnnotateMedia,
+  downloadModels,
   ensureDataset,
+  extractFrames,
   importImageFolder,
   importServerFolder,
   importVideoFolder,
   listAnnotations,
   listImportHistory,
   listMedia,
+  listModels,
   saveAnnotations,
   scanImageFolder,
   scanServerFolder,
@@ -32,7 +36,7 @@ import {
 import AnnotationCanvas from "./components/AnnotationCanvas";
 import Sidebar from "./components/Sidebar";
 import { classes } from "./data/sample";
-import type { ImportHistoryItem } from "./api";
+import type { ImportHistoryItem, ModelOption } from "./api";
 import type { Annotation, AnnotationClass, MediaSample } from "./types";
 
 type ScanResult = Awaited<ReturnType<typeof scanServerFolder>>;
@@ -49,7 +53,10 @@ export default function App() {
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
   const [isSaving, setIsSaving] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingLabel, setProcessingLabel] = useState<string | null>(null);
   const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
+  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
 
   const [parentDir, setParentDir] = useState("");
@@ -64,17 +71,24 @@ export default function App() {
   const [extractVideoFrames, setExtractVideoFrames] = useState(true);
   const [autoAnnotate, setAutoAnnotate] = useState(false);
   const [sampleEverySeconds, setSampleEverySeconds] = useState(1);
+  const [vehicleModelKey, setVehicleModelKey] = useState("custom_vehicle");
+  const [plateModelKey, setPlateModelKey] = useState("custom_plate");
 
   const annotatableMedia = useMemo(
     () => mediaItems.filter((item) => item.mediaType === "image"),
     [mediaItems]
   );
-  const videoCount = mediaItems.filter((item) => item.mediaType === "video").length;
+  const videos = useMemo(() => mediaItems.filter((item) => item.mediaType === "video"), [mediaItems]);
+  const videoCount = videos.length;
   const media = annotatableMedia[mediaIndex] ?? null;
   const mediaId = media?.id ?? null;
   const annotations = useMemo(
     () => (mediaId ? annotationsByMedia[mediaId] ?? [] : []),
     [annotationsByMedia, mediaId]
+  );
+  const selectedAnnotation = useMemo(
+    () => annotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null,
+    [annotations, selectedAnnotationId]
   );
 
   useEffect(() => {
@@ -85,6 +99,7 @@ export default function App() {
           listMedia(dataset.id),
           listImportHistory(dataset.id)
         ]);
+        const catalog = await listModels();
         if (!active) {
           return;
         }
@@ -92,6 +107,9 @@ export default function App() {
         setDatasetName(dataset.name);
         setMediaItems(media);
         setImportHistory(history);
+        setModelOptions(catalog.models);
+        setVehicleModelKey(catalog.vehicleDefault);
+        setPlateModelKey(catalog.plateDefault);
         setStatus(media.length ? "Dataset loaded" : "No imported media");
       })
       .catch((error) => setStatus(error.message));
@@ -144,12 +162,23 @@ export default function App() {
     setImportHistory(history);
   }
 
+  async function runWithProgress(label: string, action: () => Promise<void>) {
+    setIsProcessing(true);
+    setProcessingLabel(label);
+    setStatus(label);
+    try {
+      await action();
+    } finally {
+      setIsProcessing(false);
+      setProcessingLabel(null);
+    }
+  }
+
   async function handleScan() {
     if (!datasetId || !importPayloadIsValid()) {
       return;
     }
-    setStatus("Scanning server folders");
-    try {
+    await runWithProgress("Scanning server folders", async () => {
       const result =
         activeTab === "images"
           ? await scanImageFolder(
@@ -160,7 +189,9 @@ export default function App() {
               importTask,
               importMode,
               duplicatePolicy,
-              autoAnnotate
+              autoAnnotate,
+              vehicleModelKey,
+              plateModelKey
             )
           : activeTab === "videos"
             ? await scanVideoFolder(
@@ -172,7 +203,9 @@ export default function App() {
                 duplicatePolicy,
                 extractVideoFrames,
                 sampleEverySeconds,
-                autoAnnotate
+                autoAnnotate,
+                vehicleModelKey,
+                plateModelKey
               )
             : await scanServerFolder(
                 datasetId,
@@ -187,23 +220,22 @@ export default function App() {
                 importVideos,
                 extractVideoFrames,
                 sampleEverySeconds,
-                autoAnnotate
+                autoAnnotate,
+                vehicleModelKey,
+                plateModelKey
               );
       setScanResult(result);
       setStatus(
         `Found ${result.image_count} images, ${result.video_count} videos, ${result.matched_label_count} matching labels`
       );
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Scan failed");
-    }
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Scan failed"));
   }
 
   async function handleServerImport() {
     if (!datasetId || !importPayloadIsValid()) {
       return;
     }
-    setStatus("Importing from server folders");
-    try {
+    await runWithProgress("Importing from server folders", async () => {
       const result =
         activeTab === "images"
           ? await importImageFolder(
@@ -214,7 +246,9 @@ export default function App() {
               importTask,
               importMode,
               duplicatePolicy,
-              autoAnnotate
+              autoAnnotate,
+              vehicleModelKey,
+              plateModelKey
             )
           : activeTab === "videos"
             ? await importVideoFolder(
@@ -226,7 +260,9 @@ export default function App() {
                 duplicatePolicy,
                 extractVideoFrames,
                 sampleEverySeconds,
-                autoAnnotate
+                autoAnnotate,
+                vehicleModelKey,
+                plateModelKey
               )
             : await importServerFolder(
                 datasetId,
@@ -241,17 +277,18 @@ export default function App() {
                 importVideos,
                 extractVideoFrames,
                 sampleEverySeconds,
-                autoAnnotate
+                autoAnnotate,
+                vehicleModelKey,
+                plateModelKey
               );
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
       setScanResult(null);
+      setActiveTab("media");
       setStatus(
         `Imported ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames`
       );
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Import failed");
-    }
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Import failed"));
   }
 
   function openImageImport() {
@@ -272,20 +309,58 @@ export default function App() {
     if (!files || !datasetId) {
       return;
     }
-    setStatus("Uploading images");
-    try {
+    await runWithProgress("Uploading images", async () => {
       await uploadImages(datasetId, files);
       await refreshDataset(datasetId);
+      setActiveTab("media");
       setStatus(`${files.length} image${files.length === 1 ? "" : "s"} uploaded`);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Upload failed");
-    }
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Upload failed"));
   }
 
   function openMedia(index: number) {
     setMediaIndex(index);
     setSelectedAnnotationId(null);
     setScreen("annotate");
+  }
+
+  async function handleExtractFrames(video: MediaSample, withAi = autoAnnotate) {
+    await runWithProgress(`Extracting frames from ${video.fileName}`, async () => {
+      const result = await extractFrames(
+        video.id,
+        sampleEverySeconds,
+        withAi,
+        withAi ? ["vehicle", "plate"] : [importTask],
+        vehicleModelKey,
+        plateModelKey
+      );
+      await refreshDataset(datasetId);
+      setAnnotationsByMedia({});
+      setActiveTab("media");
+      setStatus(result.message ?? "Frames extracted");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Frame extraction failed"));
+  }
+
+  async function handleAiSuggestion(item: MediaSample, task: "vehicle" | "plate") {
+    await runWithProgress(`Creating ${task} suggestions for ${item.fileName}`, async () => {
+      const result = await autoAnnotateMedia(
+        item.id,
+        task,
+        task === "vehicle" ? vehicleModelKey : plateModelKey
+      );
+      const updated = await listAnnotations(item.id);
+      setAnnotationsByMedia((current) => ({ ...current, [item.id]: updated }));
+      setStatus(result.message ?? "AI suggestions created");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "AI suggestion failed"));
+  }
+
+  async function handleAiBoth(item: MediaSample) {
+    await runWithProgress(`Creating vehicle and plate suggestions for ${item.fileName}`, async () => {
+      await autoAnnotateMedia(item.id, "vehicle", vehicleModelKey);
+      const result = await autoAnnotateMedia(item.id, "plate", plateModelKey);
+      const updated = await listAnnotations(item.id);
+      setAnnotationsByMedia((current) => ({ ...current, [item.id]: updated }));
+      setStatus(result.message ?? "AI suggestions created");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "AI suggestion failed"));
   }
 
   function goTo(delta: number) {
@@ -348,6 +423,41 @@ export default function App() {
     );
   }
 
+  function relabelSelected(classKey: string) {
+    if (!selectedAnnotation) {
+      return;
+    }
+    const [task, classIdValue] = classKey.split(":");
+    const classId = Number(classIdValue);
+    const nextClass = classes.find(
+      (annotationClass) => annotationClass.task === task && annotationClass.id === classId
+    );
+    if (!nextClass) {
+      return;
+    }
+    updateAnnotation({
+      ...selectedAnnotation,
+      task: nextClass.task,
+      classId: nextClass.id,
+      className: nextClass.name,
+      reviewedByUser: "local_user",
+      verifiedAt: new Date().toISOString()
+    });
+  }
+
+  function updateSelectedBox(field: keyof Annotation["box"], value: number) {
+    if (!selectedAnnotation || Number.isNaN(value)) {
+      return;
+    }
+    const nextBox = { ...selectedAnnotation.box, [field]: clamp(value, 0.001, 1) };
+    updateAnnotation({
+      ...selectedAnnotation,
+      box: nextBox,
+      reviewedByUser: "local_user",
+      verifiedAt: new Date().toISOString()
+    });
+  }
+
   async function handleSave() {
     if (!media) {
       return;
@@ -363,6 +473,35 @@ export default function App() {
     } finally {
       setIsSaving(false);
     }
+  }
+
+  async function handleDownloadModels() {
+    await runWithProgress("Downloading YOLOv8, YOLOv9, and YOLO11 models", async () => {
+      const result = await downloadModels();
+      const catalog = await listModels();
+      setModelOptions(catalog.models);
+      setStatus(result.message ?? "Models downloaded");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Model download failed"));
+  }
+
+  function modelSelect(task: "vehicle" | "plate", compact = false) {
+    const value = task === "vehicle" ? vehicleModelKey : plateModelKey;
+    const setter = task === "vehicle" ? setVehicleModelKey : setPlateModelKey;
+    return (
+      <label className={compact ? "model-select compact" : "model-select"}>
+        <span>{task === "vehicle" ? "Vehicle model" : "Number plate model"}</span>
+        <select value={value} onChange={(event) => setter(event.target.value)}>
+          {modelOptions
+            .filter((model) => model.task === task || model.task === null || model.task === undefined)
+            .map((model) => (
+              <option key={model.key} value={model.key}>
+                {model.label}
+                {model.isDownloaded || model.isCustom ? "" : " (download)"}
+              </option>
+            ))}
+        </select>
+      </label>
+    );
   }
 
   if (screen === "annotate") {
@@ -396,6 +535,12 @@ export default function App() {
             <button title="Delete selected" onClick={deleteSelected}>
               <Trash2 size={18} />
             </button>
+            <button title="AI vehicle suggestions" onClick={() => media && handleAiSuggestion(media, "vehicle")} disabled={!media || isProcessing}>
+              <Wand2 size={18} />
+            </button>
+            <button title="AI plate suggestions" onClick={() => media && handleAiSuggestion(media, "plate")} disabled={!media || isProcessing}>
+              <Wand2 size={18} />
+            </button>
             <button title="Save annotations" onClick={handleSave} disabled={!media || isSaving}>
               <Save size={18} />
             </button>
@@ -420,6 +565,7 @@ export default function App() {
                   : ""}
               </span>
             </div>
+            {isProcessing ? <ProgressStrip label={processingLabel ?? "Processing"} /> : null}
             {media ? (
               <AnnotationCanvas
                 media={media}
@@ -453,6 +599,54 @@ export default function App() {
               <span>Verified</span>
               <strong>{annotations.filter((item) => item.verifiedAt).length}</strong>
             </div>
+            {media ? (
+              <div className="ai-action-stack">
+                {modelSelect("vehicle", true)}
+                {modelSelect("plate", true)}
+                <button onClick={() => handleAiSuggestion(media, "vehicle")} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI vehicle
+                </button>
+                <button onClick={() => handleAiSuggestion(media, "plate")} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI plate
+                </button>
+              </div>
+            ) : null}
+            {selectedAnnotation ? (
+              <div className="annotation-editor">
+                <h2>Edit selected</h2>
+                <label>
+                  <span>Class</span>
+                  <select
+                    value={`${selectedAnnotation.task}:${selectedAnnotation.classId}`}
+                    onChange={(event) => relabelSelected(event.target.value)}
+                  >
+                    {classes.map((annotationClass) => (
+                      <option
+                        key={`${annotationClass.task}:${annotationClass.id}`}
+                        value={`${annotationClass.task}:${annotationClass.id}`}
+                      >
+                        {annotationClass.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(["xCenter", "yCenter", "width", "height"] as const).map((field) => (
+                  <label key={field}>
+                    <span>{field}</span>
+                    <input
+                      type="number"
+                      min="0.001"
+                      max="1"
+                      step="0.001"
+                      value={selectedAnnotation.box[field].toFixed(3)}
+                      onChange={(event) => updateSelectedBox(field, Number(event.target.value))}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
           </aside>
         </main>
       </div>
@@ -467,6 +661,9 @@ export default function App() {
           <h1>{datasetName}</h1>
         </div>
         <div className="toolbar">
+          <button title="Download YOLOv8, YOLOv9, YOLO11" onClick={handleDownloadModels} disabled={isProcessing}>
+            <Wand2 size={18} />
+          </button>
           <label className="upload-button" title="Upload images">
             <ImagePlus size={18} />
             <input
@@ -480,6 +677,7 @@ export default function App() {
       </header>
 
       <main className="home-layout">
+        {isProcessing ? <ProgressStrip label={processingLabel ?? "Processing"} /> : null}
         <nav className="dashboard-tabs" aria-label="Dashboard sections">
           <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => setActiveTab("dashboard")}>
             <BarChart3 size={17} />
@@ -542,6 +740,20 @@ export default function App() {
               <div>
                 <span>Status</span>
                 <strong>{status}</strong>
+              </div>
+            </div>
+            <div className="model-panel">
+              <div className="section-title">
+                <Wand2 size={18} />
+                <h2>AI Models</h2>
+              </div>
+              <div className="model-grid">
+                {modelSelect("vehicle")}
+                {modelSelect("plate")}
+                <button onClick={handleDownloadModels} disabled={isProcessing}>
+                  <Wand2 size={17} />
+                  Download YOLOv8 / YOLOv9 / YOLO11
+                </button>
               </div>
             </div>
           </section>
@@ -640,6 +852,8 @@ export default function App() {
                   <option value="import_copy">Import copies</option>
                 </select>
               </label>
+              {modelSelect("vehicle")}
+              {modelSelect("plate")}
             </div>
 
             <div className="option-strip">
@@ -723,15 +937,34 @@ export default function App() {
               </div>
             </div>
             <div className="gallery-grid home-gallery">
+              {videos.map((item) => (
+                <div className="gallery-tile media-card" key={item.id}>
+                  <div className="video-thumb">
+                    <Film size={30} />
+                  </div>
+                  <span>{item.fileName}</span>
+                  <small>Video source</small>
+                  <div className="card-actions">
+                    <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Extract frames</button>
+                    <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Extract + AI</button>
+                  </div>
+                </div>
+              ))}
               {annotatableMedia.map((item, index) => (
-                <button className="gallery-tile" key={item.id} onClick={() => openMedia(index)}>
+                <div className="gallery-tile media-card" key={item.id}>
                   <img src={item.imageUrl} alt={item.fileName} />
                   <span>{item.fileName}</span>
                   {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
-                </button>
+                  <div className="card-actions">
+                    <button onClick={() => openMedia(index)}>Annotate</button>
+                    <button onClick={() => handleAiBoth(item)} disabled={isProcessing}>AI both</button>
+                    <button onClick={() => handleAiSuggestion(item, "vehicle")} disabled={isProcessing}>Vehicle</button>
+                    <button onClick={() => handleAiSuggestion(item, "plate")} disabled={isProcessing}>Plate</button>
+                  </div>
+                </div>
               ))}
-              {annotatableMedia.length === 0 ? (
-                <div className="empty-gallery">No imported images or frames</div>
+              {annotatableMedia.length === 0 && videos.length === 0 ? (
+                <div className="empty-gallery">No imported media</div>
               ) : null}
             </div>
           </section>
@@ -758,4 +991,17 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function ProgressStrip({ label }: { label: string }) {
+  return (
+    <div className="progress-strip" role="status" aria-live="polite">
+      <div className="progress-bar" />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }

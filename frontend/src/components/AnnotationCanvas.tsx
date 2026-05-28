@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 
+import { classes } from "../data/sample";
 import type { Annotation, AnnotationClass, Box, MediaSample } from "../types";
 
 type CanvasProps = {
@@ -26,6 +27,7 @@ function useImage(url: string) {
   useEffect(() => {
     const nextImage = new window.Image();
     nextImage.crossOrigin = "anonymous";
+    setImage(null);
     nextImage.src = url;
     nextImage.onload = () => setImage(nextImage);
   }, [url]);
@@ -87,6 +89,15 @@ export default function AnnotationCanvas({
       scale
     };
   }, [containerWidth, media.height, media.width]);
+
+  function annotationColor(annotation: Annotation) {
+    return (
+      classes.find(
+        (annotationClass) =>
+          annotationClass.task === annotation.task && annotationClass.id === annotation.classId
+      )?.color ?? (annotation.task === "plate" ? "#14b8a6" : "#f97316")
+    );
+  }
 
   function pointerPosition(event: { target: { getStage: () => any } }) {
     const stage = event.target.getStage();
@@ -158,7 +169,7 @@ export default function AnnotationCanvas({
         <Layer>
           {annotations.map((annotation) => {
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
-            const color = annotation.task === "plate" ? "#0f766e" : "#d95836";
+            const color = annotationColor(annotation);
             const selected = annotation.id === selectedAnnotationId;
             return (
               <Rect
@@ -167,11 +178,13 @@ export default function AnnotationCanvas({
                 y={box.y}
                 width={box.width}
                 height={box.height}
+                fill={selected ? `${color}33` : `${color}1f`}
                 stroke={selected ? "#f8fafc" : color}
-                strokeWidth={selected ? 3 : 2}
+                strokeWidth={selected ? 4 : 3}
                 dash={annotation.status === "draft" ? [8, 5] : undefined}
                 draggable
                 onClick={() => onSelectAnnotation(annotation.id)}
+                onTap={() => onSelectAnnotation(annotation.id)}
                 onDragEnd={(event) => {
                   onUpdateAnnotation({
                     ...annotation,
@@ -187,17 +200,33 @@ export default function AnnotationCanvas({
           })}
           {annotations.map((annotation) => {
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
+            const color = annotationColor(annotation);
+            const label = `${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
+            const labelWidth = Math.max(76, label.length * 7 + 10);
+            const labelY = Math.max(0, box.y - 23);
             return (
-              <Text
-                key={`${annotation.id}-label`}
-                x={box.x}
-                y={Math.max(0, box.y - 20)}
-                text={annotation.className}
-                fontSize={13}
-                fill="#ffffff"
-                padding={4}
-                listening={false}
-              />
+              <Fragment key={`${annotation.id}-label-wrap`}>
+                <Rect
+                  key={`${annotation.id}-label-bg`}
+                  x={box.x}
+                  y={labelY}
+                  width={labelWidth}
+                  height={22}
+                  fill={annotation.id === selectedAnnotationId ? "#f8fafc" : color}
+                  cornerRadius={3}
+                  listening={false}
+                />
+                <Text
+                  key={`${annotation.id}-label`}
+                  x={box.x + 5}
+                  y={labelY + 4}
+                  text={label}
+                  fontSize={12}
+                  fontStyle="bold"
+                  fill={annotation.id === selectedAnnotationId ? "#0d141f" : "#ffffff"}
+                  listening={false}
+                />
+              </Fragment>
             );
           })}
           {draftBox ? (

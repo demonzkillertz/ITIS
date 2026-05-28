@@ -1,3 +1,4 @@
+import re
 import shutil
 from pathlib import Path
 from uuid import UUID
@@ -15,6 +16,7 @@ from app.domain.classes import AnnotationTask
 from app.domain.schemas import AnnotationSource, AnnotationStatus
 from app.domain.schemas import (
     DuplicatePolicy,
+    FrameExtractionCreate,
     ImportSourceType,
     ImportIssue,
     ImportSessionRead,
@@ -25,6 +27,7 @@ from app.domain.schemas import (
     ServerFolderImportRead,
     ServerFolderScanRead,
 )
+from app.services.model_registry import is_base_model_key, model_path_for_key
 from app.services.yolo_labels import YoloLabelError, parse_label_file
 
 router = APIRouter()
@@ -161,7 +164,8 @@ def import_server_folder(
             if label_dir is not None:
                 import_labels_for_media(db, media_item, label_dir / f"{image_path.stem}.txt", payload, report)
             if payload.auto_annotate:
-                auto_annotate_image(db, media_item, payload, report)
+                model_key = payload.vehicle_model_key if payload.task == AnnotationTask.VEHICLE else payload.plate_model_key
+                auto_annotate_image(db, media_item, payload, report, model_key)
 
     if payload.import_videos and video_dir is not None:
         for video_path in sorted(video_dir.rglob("*")):
@@ -194,7 +198,8 @@ def import_server_folder(
                 saved_items.extend(frames)
                 if payload.auto_annotate:
                     for frame_item in frames:
-                        auto_annotate_image(db, frame_item, payload, report)
+                        model_key = payload.vehicle_model_key if payload.task == AnnotationTask.VEHICLE else payload.plate_model_key
+                        auto_annotate_image(db, frame_item, payload, report, model_key)
 
     import_session.imported_images = report.imported_images
     import_session.imported_videos = report.imported_videos
@@ -358,10 +363,73 @@ async def upload_video(dataset_id: UUID, video: UploadFile) -> ProcessingJobRead
     return ProcessingJobRead(kind="video_processing", message="Video processing queued")
 
 
+@router.post("/{media_id}/extract-frames", response_model=ProcessingJobRead)
+def extract_frames_for_video(
+    media_id: UUID,
+    payload: FrameExtractionCreate,
+    db: Session = Depends(get_db),
+) -> ProcessingJobRead:
+    video_item = db.get(models.MediaItem, media_id)
+    if video_item is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+    if video_item.media_type != MediaType.VIDEO.value:
+        raise HTTPException(status_code=400, detail="Selected media is not a video")
+
+    video_path = settings.storage_root / video_item.storage_key
+    frame_root = settings.storage_root / "frames" / str(video_item.dataset_id)
+    frame_root.mkdir(parents=True, exist_ok=True)
+    tasks = payload.tasks or [payload.task]
+    primary_task = tasks[0]
+    report = ServerFolderImportRead(task=primary_task)
+    import_session = models.ImportSession(
+        dataset_id=video_item.dataset_id,
+        parent_dir=None,
+        image_dir="",
+        video_dir=video_item.source_path or video_item.file_name,
+        label_dir=None,
+        source_type=ImportSourceType.VIDEO_FOLDER,
+        task=primary_task,
+        duplicate_policy=DuplicatePolicy.IMPORT_COPY,
+    )
+    db.add(import_session)
+    db.flush()
+
+    frames = extract_video_frames(
+        db,
+        video_item.dataset_id,
+        video_item,
+        video_path,
+        frame_root,
+        ServerFolderImportCreate(
+            task=primary_task,
+            video_sample_every_seconds=payload.sample_every_seconds,
+        ),
+        report,
+        import_session.id,
+    )
+    if payload.auto_annotate:
+        for frame_item in frames:
+            for task in tasks:
+                model_key = payload.vehicle_model_key if task == AnnotationTask.VEHICLE else payload.plate_model_key
+                auto_annotate_image(db, frame_item, ServerFolderImportCreate(task=task), report, model_key)
+
+    import_session.imported_frames = report.imported_frames
+    import_session.model_annotations = report.model_annotations
+    import_session.issue_count = len(report.issues)
+    db.commit()
+
+    return ProcessingJobRead(
+        kind="frame_extraction",
+        status="completed",
+        message=f"Extracted {report.imported_frames} frames and created {report.model_annotations} AI boxes",
+    )
+
+
 @router.post("/{media_id}/auto-annotate", response_model=ProcessingJobRead)
 def auto_annotate_media(
     media_id: UUID,
     task: AnnotationTask = AnnotationTask.VEHICLE,
+    model_key: str | None = None,
     db: Session = Depends(get_db),
 ) -> ProcessingJobRead:
     media = db.get(models.MediaItem, media_id)
@@ -380,7 +448,7 @@ def auto_annotate_media(
 
     for target in targets:
         if target.media_type == MediaType.IMAGE.value:
-            auto_annotate_image(db, target, payload, report)
+            auto_annotate_image(db, target, payload, report, model_key)
 
     db.commit()
     return ProcessingJobRead(
@@ -395,8 +463,9 @@ def auto_annotate_image(
     media_item: models.MediaItem,
     payload: ServerFolderImportCreate,
     report: ServerFolderImportRead,
+    model_key: str | None,
 ) -> None:
-    model_path = settings.vehicle_model_path if payload.task == "vehicle" else settings.plate_model_path
+    model_path = model_path_for_key(model_key, payload.task)
     if not model_path.exists():
         report.issues.append(
             ImportIssue(
@@ -423,33 +492,123 @@ def auto_annotate_image(
         )
         return
 
+    existing_boxes = [
+        {
+            "task": annotation.task,
+            "class_id": annotation.class_id,
+            "x_center": annotation.x_center,
+            "y_center": annotation.y_center,
+            "width": annotation.width,
+            "height": annotation.height,
+        }
+        for annotation in db.scalars(
+            select(models.Annotation).where(
+                models.Annotation.media_id == media_item.id,
+                models.Annotation.task == payload.task,
+            )
+        ).all()
+    ]
+
     for result in results:
         image_width = float(result.orig_shape[1])
         image_height = float(result.orig_shape[0])
         for box in result.boxes:
-            class_id = int(box.cls.item())
+            raw_class_id = int(box.cls.item())
+            class_id = map_model_class(payload.task, raw_class_id, model_key)
+            if class_id is None:
+                continue
             xyxy = box.xyxy[0].tolist()
             x1, y1, x2, y2 = [float(value) for value in xyxy]
             width = max(0.0, x2 - x1)
             height = max(0.0, y2 - y1)
             if width <= 0 or height <= 0:
                 continue
+            normalized_box = {
+                "task": payload.task,
+                "class_id": class_id,
+                "x_center": (x1 + width / 2) / image_width,
+                "y_center": (y1 + height / 2) / image_height,
+                "width": width / image_width,
+                "height": height / image_height,
+            }
+            if has_duplicate_annotation(existing_boxes, normalized_box):
+                continue
             db.add(
                 models.Annotation(
                     media_id=media_item.id,
                     task=payload.task,
                     class_id=class_id,
-                    x_center=(x1 + width / 2) / image_width,
-                    y_center=(y1 + height / 2) / image_height,
-                    width=width / image_width,
-                    height=height / image_height,
+                    x_center=normalized_box["x_center"],
+                    y_center=normalized_box["y_center"],
+                    width=normalized_box["width"],
+                    height=normalized_box["height"],
                     confidence=float(box.conf.item()),
                     source=AnnotationSource.MODEL,
                     status=AnnotationStatus.DRAFT,
                     is_prefetched=False,
                 )
             )
+            existing_boxes.append(normalized_box)
             report.model_annotations += 1
+
+
+def has_duplicate_annotation(
+    existing_boxes: list[dict[str, object]],
+    candidate: dict[str, object],
+    iou_threshold: float = 0.85,
+) -> bool:
+    return any(
+        existing["task"] == candidate["task"]
+        and existing["class_id"] == candidate["class_id"]
+        and box_iou(existing, candidate) >= iou_threshold
+        for existing in existing_boxes
+    )
+
+
+def box_iou(first: dict[str, object], second: dict[str, object]) -> float:
+    first_x1, first_y1, first_x2, first_y2 = box_to_corners(first)
+    second_x1, second_y1, second_x2, second_y2 = box_to_corners(second)
+    intersection_width = max(0.0, min(first_x2, second_x2) - max(first_x1, second_x1))
+    intersection_height = max(0.0, min(first_y2, second_y2) - max(first_y1, second_y1))
+    intersection = intersection_width * intersection_height
+    first_area = max(0.0, first_x2 - first_x1) * max(0.0, first_y2 - first_y1)
+    second_area = max(0.0, second_x2 - second_x1) * max(0.0, second_y2 - second_y1)
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def box_to_corners(box: dict[str, object]) -> tuple[float, float, float, float]:
+    x_center = float(box["x_center"])
+    y_center = float(box["y_center"])
+    width = float(box["width"])
+    height = float(box["height"])
+    return (
+        x_center - width / 2,
+        y_center - height / 2,
+        x_center + width / 2,
+        y_center + height / 2,
+    )
+
+
+def map_model_class(
+    task: AnnotationTask,
+    raw_class_id: int,
+    model_key: str | None,
+) -> int | None:
+    if task == AnnotationTask.PLATE:
+        return raw_class_id if not is_base_model_key(model_key) and raw_class_id == 0 else None
+
+    if is_base_model_key(model_key):
+        coco_to_vehicle = {
+            1: 0,
+            3: 0,
+            2: 1,
+            5: 2,
+            7: 3,
+        }
+        return coco_to_vehicle.get(raw_class_id)
+
+    return raw_class_id if raw_class_id in {0, 1, 2, 3} else None
 
 
 def ensure_dataset(db: Session, dataset_id: UUID) -> models.Dataset:
@@ -596,6 +755,11 @@ def read_video_metadata(path: Path) -> tuple[int, int, float, int]:
     return width, height, fps, frame_count
 
 
+def safe_path_name(value: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return cleaned or "video"
+
+
 def extract_video_frames(
     db: Session,
     dataset_id: UUID,
@@ -618,7 +782,9 @@ def extract_video_frames(
     frames: list[models.MediaItem] = []
     frame_number = 0
     saved_index = 0
-    video_frame_root = frame_root / str(video_item.id)
+    safe_video_name = safe_path_name(video_path.stem or Path(video_item.file_name).stem)
+    frame_folder_name = f"{safe_video_name}_{str(video_item.id)[:8]}"
+    video_frame_root = frame_root / frame_folder_name
     video_frame_root.mkdir(parents=True, exist_ok=True)
 
     while True:
@@ -627,14 +793,15 @@ def extract_video_frames(
             break
         if frame_number % step == 0:
             timestamp = frame_number / fps if fps else 0
-            frame_name = f"{video_path.stem}_frame_{saved_index:06d}.jpg"
+            timestamp_ms = int(timestamp * 1000)
+            frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
             frame_path = video_frame_root / frame_name
             cv2.imwrite(str(frame_path), frame)
             height, width = frame.shape[:2]
             frame_item = models.MediaItem(
                 dataset_id=dataset_id,
                 file_name=frame_name,
-                storage_key=f"frames/{dataset_id}/{video_item.id}/{frame_name}",
+                storage_key=f"frames/{dataset_id}/{frame_folder_name}/{frame_name}",
                 media_type=MediaType.IMAGE.value,
                 source_path=str(video_path),
                 import_session_id=import_session_id,

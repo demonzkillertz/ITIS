@@ -101,6 +101,34 @@ type ApiImportHistoryItem = {
   created_at: string;
 };
 
+export type ModelOption = {
+  key: string;
+  label: string;
+  task?: AnnotationTask | null;
+  family: string;
+  fileName: string;
+  path?: string | null;
+  isCustom: boolean;
+  isDownloaded: boolean;
+};
+
+type ApiModelOption = {
+  key: string;
+  label: string;
+  task?: AnnotationTask | null;
+  family: string;
+  file_name: string;
+  path?: string | null;
+  is_custom: boolean;
+  is_downloaded: boolean;
+};
+
+type ApiModelCatalog = {
+  vehicle_default: string;
+  plate_default: string;
+  models: ApiModelOption[];
+};
+
 export type ImportHistoryItem = {
   id: string;
   imageDir: string;
@@ -177,7 +205,9 @@ export async function importServerFolder(
   importVideos: boolean,
   extractVideoFrames: boolean,
   sampleEverySeconds: number,
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return importFolderAt(`/api/media/${datasetId}/server-folder`, {
     parentDir,
@@ -191,7 +221,9 @@ export async function importServerFolder(
     importVideos,
     extractVideoFrames,
     sampleEverySeconds,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -203,7 +235,9 @@ export async function importImageFolder(
   task: AnnotationTask,
   mode: "auto" | "explicit",
   duplicatePolicy: "skip" | "import_copy",
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return importFolderAt(`/api/media/${datasetId}/image-folder/import`, {
     parentDir,
@@ -217,7 +251,9 @@ export async function importImageFolder(
     importVideos: false,
     extractVideoFrames: false,
     sampleEverySeconds: 1,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -230,7 +266,9 @@ export async function importVideoFolder(
   duplicatePolicy: "skip" | "import_copy",
   extractVideoFrames: boolean,
   sampleEverySeconds: number,
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return importFolderAt(`/api/media/${datasetId}/video-folder/import`, {
     parentDir,
@@ -244,7 +282,9 @@ export async function importVideoFolder(
     importVideos: true,
     extractVideoFrames,
     sampleEverySeconds,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -261,6 +301,8 @@ type FolderPayload = {
   extractVideoFrames: boolean;
   sampleEverySeconds: number;
   autoAnnotate: boolean;
+  vehicleModelKey?: string;
+  plateModelKey?: string;
 };
 
 async function importFolderAt(path: string, payload: FolderPayload) {
@@ -318,7 +360,9 @@ export async function scanServerFolder(
   importVideos: boolean,
   extractVideoFrames: boolean,
   sampleEverySeconds: number,
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return scanFolderAt(`/api/media/${datasetId}/server-folder/scan`, {
     parentDir,
@@ -332,7 +376,9 @@ export async function scanServerFolder(
     importVideos,
     extractVideoFrames,
     sampleEverySeconds,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -344,7 +390,9 @@ export async function scanImageFolder(
   task: AnnotationTask,
   mode: "auto" | "explicit",
   duplicatePolicy: "skip" | "import_copy",
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return scanFolderAt(`/api/media/${datasetId}/image-folder/scan`, {
     parentDir,
@@ -358,7 +406,9 @@ export async function scanImageFolder(
     importVideos: false,
     extractVideoFrames: false,
     sampleEverySeconds: 1,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -371,7 +421,9 @@ export async function scanVideoFolder(
   duplicatePolicy: "skip" | "import_copy",
   extractVideoFrames: boolean,
   sampleEverySeconds: number,
-  autoAnnotate: boolean
+  autoAnnotate: boolean,
+  vehicleModelKey?: string,
+  plateModelKey?: string
 ) {
   return scanFolderAt(`/api/media/${datasetId}/video-folder/scan`, {
     parentDir,
@@ -385,7 +437,9 @@ export async function scanVideoFolder(
     importVideos: true,
     extractVideoFrames,
     sampleEverySeconds,
-    autoAnnotate
+    autoAnnotate,
+    vehicleModelKey,
+    plateModelKey
   });
 }
 
@@ -405,7 +459,9 @@ function scanFolderAt(path: string, payload: FolderPayload) {
       import_videos: payload.importVideos,
       extract_video_frames: payload.extractVideoFrames,
       video_sample_every_seconds: payload.sampleEverySeconds,
-      auto_annotate: payload.autoAnnotate
+      auto_annotate: payload.autoAnnotate,
+      vehicle_model_key: payload.vehicleModelKey,
+      plate_model_key: payload.plateModelKey
     })
   });
 }
@@ -435,6 +491,31 @@ export async function listAnnotations(mediaId: string): Promise<Annotation[]> {
   return annotations.map(fromApiAnnotation);
 }
 
+export async function listModels() {
+  const catalog = await request<ApiModelCatalog>("/api/models");
+  return {
+    vehicleDefault: catalog.vehicle_default,
+    plateDefault: catalog.plate_default,
+    models: catalog.models.map((model) => ({
+      key: model.key,
+      label: model.label,
+      task: model.task,
+      family: model.family,
+      fileName: model.file_name,
+      path: model.path,
+      isCustom: model.is_custom,
+      isDownloaded: model.is_downloaded
+    }))
+  };
+}
+
+export async function downloadModels(keys?: string[]) {
+  return request<{ message?: string }>("/api/models/download", {
+    method: "POST",
+    body: JSON.stringify({ keys: keys ?? null })
+  });
+}
+
 export async function saveAnnotations(mediaId: string, annotations: Annotation[]) {
   const payload = annotations.map((annotation) => toApiAnnotation(mediaId, annotation));
   const saved = await request<ApiAnnotation[]>(`/api/annotations/${mediaId}`, {
@@ -442,6 +523,37 @@ export async function saveAnnotations(mediaId: string, annotations: Annotation[]
     body: JSON.stringify(payload)
   });
   return saved.map(fromApiAnnotation);
+}
+
+export async function extractFrames(
+  mediaId: string,
+  sampleEverySeconds: number,
+  autoAnnotate: boolean,
+  tasks: AnnotationTask[],
+  vehicleModelKey?: string,
+  plateModelKey?: string
+) {
+  return request<{ message?: string }>(`/api/media/${mediaId}/extract-frames`, {
+    method: "POST",
+    body: JSON.stringify({
+      sample_every_seconds: sampleEverySeconds,
+      auto_annotate: autoAnnotate,
+      task: tasks[0] ?? "vehicle",
+      tasks,
+      vehicle_model_key: vehicleModelKey,
+      plate_model_key: plateModelKey
+    })
+  });
+}
+
+export async function autoAnnotateMedia(mediaId: string, task: AnnotationTask, modelKey?: string) {
+  const params = new URLSearchParams({ task });
+  if (modelKey) {
+    params.set("model_key", modelKey);
+  }
+  return request<{ message?: string }>(`/api/media/${mediaId}/auto-annotate?${params.toString()}`, {
+    method: "POST"
+  });
 }
 
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
