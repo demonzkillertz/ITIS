@@ -20,6 +20,7 @@ export default function App() {
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState("Loading dataset");
   const [mediaItems, setMediaItems] = useState<MediaSample[]>([]);
+  const [viewMode, setViewMode] = useState<"gallery" | "annotate">("gallery");
   const [mediaIndex, setMediaIndex] = useState(0);
   const [confidence, setConfidence] = useState(0.45);
   const [selectedClass, setSelectedClass] = useState<AnnotationClass>(classes[1]);
@@ -29,13 +30,23 @@ export default function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [parentDir, setParentDir] = useState("");
   const [imageDir, setImageDir] = useState("");
+  const [videoDir, setVideoDir] = useState("");
   const [labelDir, setLabelDir] = useState("");
   const [importTask, setImportTask] = useState<"vehicle" | "plate">("vehicle");
   const [importMode, setImportMode] = useState<"auto" | "explicit">("auto");
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "import_copy">("skip");
+  const [importImages, setImportImages] = useState(true);
+  const [importVideos, setImportVideos] = useState(false);
+  const [extractVideoFrames, setExtractVideoFrames] = useState(true);
+  const [autoAnnotate, setAutoAnnotate] = useState(false);
+  const [sampleEverySeconds, setSampleEverySeconds] = useState(1);
   const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
 
-  const media = mediaItems[mediaIndex] ?? null;
+  const annotatableMedia = useMemo(
+    () => mediaItems.filter((item) => item.mediaType === "image"),
+    [mediaItems]
+  );
+  const media = annotatableMedia[mediaIndex] ?? null;
   const mediaId = media?.id ?? null;
   const annotations = useMemo(
     () => (mediaId ? annotationsByMedia[mediaId] ?? [] : []),
@@ -99,7 +110,14 @@ export default function App() {
   }
 
   function addAnnotation(annotation: Annotation) {
-    replaceAnnotations([...annotations, annotation]);
+    replaceAnnotations([
+      ...annotations,
+      {
+        ...annotation,
+        reviewedByUser: "local_user",
+        verifiedAt: new Date().toISOString()
+      }
+    ]);
     setSelectedAnnotationId(annotation.id);
   }
 
@@ -118,15 +136,29 @@ export default function App() {
     replaceAnnotations(
       annotations.map((annotation) =>
         annotation.id === selectedAnnotationId
-          ? { ...annotation, status: "accepted", source: "manual" }
+          ? {
+              ...annotation,
+              status: "accepted",
+              reviewedByUser: "local_user",
+              verifiedAt: new Date().toISOString()
+            }
           : annotation
       )
     );
   }
 
   function goTo(delta: number) {
-    setMediaIndex((current) => Math.min(mediaItems.length - 1, Math.max(0, current + delta)));
+    setMediaIndex((current) =>
+      Math.min(annotatableMedia.length - 1, Math.max(0, current + delta))
+    );
     setSelectedAnnotationId(null);
+    setViewMode("annotate");
+  }
+
+  function openMedia(index: number) {
+    setMediaIndex(index);
+    setSelectedAnnotationId(null);
+    setViewMode("annotate");
   }
 
   async function handleUpload(files: FileList | null) {
@@ -138,7 +170,7 @@ export default function App() {
       const uploaded = await uploadImages(datasetId, files);
       const nextMedia = [...mediaItems, ...uploaded];
       setMediaItems(nextMedia);
-      setMediaIndex(Math.max(0, nextMedia.length - uploaded.length));
+      setMediaIndex(Math.max(0, nextMedia.filter((item) => item.mediaType === "image").length - uploaded.length));
       setStatus(`${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded`);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Upload failed");
@@ -166,12 +198,20 @@ export default function App() {
     if (!datasetId) {
       return;
     }
-    if (importMode === "auto" && !parentDir.trim() && !imageDir.trim()) {
-      setStatus("Enter a parent folder or image folder path");
+    if (!importImages && !importVideos) {
+      setStatus("Choose images, videos, or both");
       return;
     }
-    if (importMode === "explicit" && !imageDir.trim()) {
+    if (importMode === "auto" && !parentDir.trim() && !imageDir.trim() && !videoDir.trim()) {
+      setStatus("Enter a parent, image, or video folder path");
+      return;
+    }
+    if (importMode === "explicit" && importImages && !imageDir.trim()) {
       setStatus("Enter an image folder path");
+      return;
+    }
+    if (importMode === "explicit" && importVideos && !videoDir.trim()) {
+      setStatus("Enter a video folder path");
       return;
     }
     setStatus("Importing server folder");
@@ -180,20 +220,30 @@ export default function App() {
         datasetId,
         parentDir.trim(),
         imageDir.trim(),
+        videoDir.trim(),
         labelDir.trim(),
         importTask,
         importMode,
-        duplicatePolicy
+        duplicatePolicy,
+        importImages,
+        importVideos,
+        extractVideoFrames,
+        sampleEverySeconds,
+        autoAnnotate
       );
       const refreshed = await listMedia(datasetId);
       const history = await listImportHistory(datasetId);
       setMediaItems(refreshed);
       setImportHistory(history);
       setAnnotationsByMedia({});
-      setMediaIndex(Math.max(0, refreshed.length - result.media.length));
+      setMediaIndex(
+        Math.max(0, refreshed.filter((item) => item.mediaType === "image").length - result.media.length)
+      );
       setSelectedAnnotationId(null);
       setStatus(
-        `Imported ${result.importedImages} images and ${result.importedAnnotations} labels${
+        `Imported ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames, ${result.importedAnnotations} labels${
+          result.modelAnnotations ? `, ${result.modelAnnotations} model boxes` : ""
+        }${
           result.issueCount ? `, ${result.issueCount} issues` : ""
         }`
       );
@@ -214,12 +264,12 @@ export default function App() {
             <ChevronLeft size={18} />
           </button>
           <span className="frame-counter">
-            {mediaItems.length ? mediaIndex + 1 : 0} / {mediaItems.length}
+            {annotatableMedia.length ? mediaIndex + 1 : 0} / {annotatableMedia.length}
           </span>
           <button
             title="Next frame"
             onClick={() => goTo(1)}
-            disabled={mediaIndex === mediaItems.length - 1 || mediaItems.length === 0}
+            disabled={mediaIndex === annotatableMedia.length - 1 || annotatableMedia.length === 0}
           >
             <ChevronRight size={18} />
           </button>
@@ -241,6 +291,9 @@ export default function App() {
               onChange={(event) => handleUpload(event.target.files)}
             />
           </label>
+          <button title="Gallery" onClick={() => setViewMode("gallery")}>
+            <ImagePlus size={18} />
+          </button>
         </div>
       </header>
 
@@ -256,7 +309,9 @@ export default function App() {
 
         <section className="canvas-column" aria-label="Annotation canvas">
           <div className="media-meta">
-            <strong>{media ? media.fileName : "No image selected"}</strong>
+            <strong>
+              {viewMode === "gallery" ? "Imported Image Gallery" : media ? media.fileName : "No image selected"}
+            </strong>
             <span>
               {status}
               {media && typeof media.timestampSeconds === "number"
@@ -264,7 +319,23 @@ export default function App() {
                 : ""}
             </span>
           </div>
-          {media ? (
+          {viewMode === "gallery" ? (
+            <div className="gallery-grid">
+              {annotatableMedia.map((item, index) => (
+                <button className="gallery-tile" key={item.id} onClick={() => openMedia(index)}>
+                  <img src={item.imageUrl} alt={item.fileName} />
+                  <span>{item.fileName}</span>
+                  {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
+                </button>
+              ))}
+              {annotatableMedia.length === 0 ? (
+                <div className="empty-canvas">
+                  <ImagePlus size={32} />
+                  <span>Import server folders or upload images to begin</span>
+                </div>
+              ) : null}
+            </div>
+          ) : media ? (
             <AnnotationCanvas
               media={media}
               annotations={visibleAnnotations}
@@ -317,6 +388,15 @@ export default function App() {
               />
             </label>
             <label>
+              <span>Video folder</span>
+              <input
+                type="text"
+                value={videoDir}
+                onChange={(event) => setVideoDir(event.target.value)}
+                placeholder="C:\\datasets\\traffic\\videos"
+              />
+            </label>
+            <label>
               <span>Label folder</span>
               <input
                 type="text"
@@ -347,17 +427,64 @@ export default function App() {
                 <option value="import_copy">Import as copies</option>
               </select>
             </label>
+            <div className="toggle-grid">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={importImages}
+                  onChange={(event) => setImportImages(event.target.checked)}
+                />
+                <span>Images</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={importVideos}
+                  onChange={(event) => setImportVideos(event.target.checked)}
+                />
+                <span>Videos</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={extractVideoFrames}
+                  onChange={(event) => setExtractVideoFrames(event.target.checked)}
+                />
+                <span>Extract frames</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={autoAnnotate}
+                  onChange={(event) => setAutoAnnotate(event.target.checked)}
+                />
+                <span>YOLO annotate</span>
+              </label>
+            </div>
+            <label>
+              <span>Video sample seconds</span>
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                value={sampleEverySeconds}
+                onChange={(event) => setSampleEverySeconds(Number(event.target.value))}
+              />
+            </label>
             <button onClick={handleServerImport}>Import</button>
           </div>
           <div className="import-history">
             <h3>Import History</h3>
             {importHistory.slice(0, 5).map((item) => (
               <div className="history-row" key={item.id}>
-                <strong>{item.importedImages} images</strong>
+                <strong>
+                  {item.importedImages} images, {item.importedVideos} videos
+                </strong>
                 <span>
-                  {item.importedAnnotations} labels, {item.skippedImages} skipped
+                  {item.importedFrames} frames, {item.importedAnnotations} labels,{" "}
+                  {item.modelAnnotations} model boxes
                 </span>
-                <small>{item.imageDir}</small>
+                <small>{item.imageDir || item.videoDir}</small>
               </div>
             ))}
             {importHistory.length === 0 ? <p>No imports yet</p> : null}

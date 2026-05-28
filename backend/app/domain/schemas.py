@@ -36,6 +36,17 @@ class DuplicatePolicy(StrEnum):
     IMPORT_COPY = "import_copy"
 
 
+class MediaType(StrEnum):
+    IMAGE = "image"
+    VIDEO = "video"
+
+
+class ImportSourceType(StrEnum):
+    IMAGE_FOLDER = "image_folder"
+    VIDEO_FOLDER = "video_folder"
+    MIXED_FOLDER = "mixed_folder"
+
+
 class Box(BaseModel):
     x_center: float = Field(ge=0, le=1)
     y_center: float = Field(ge=0, le=1)
@@ -51,6 +62,9 @@ class AnnotationCreate(BaseModel):
     confidence: float | None = Field(default=None, ge=0, le=1)
     source: AnnotationSource = AnnotationSource.MANUAL
     status: AnnotationStatus = AnnotationStatus.ACCEPTED
+    is_prefetched: bool = False
+    reviewed_by_user: str | None = None
+    verified_at: datetime | None = None
 
 
 class AnnotationRead(AnnotationCreate):
@@ -87,31 +101,46 @@ class MediaRead(BaseModel):
     dataset_id: UUID
     file_name: str
     image_url: str
+    media_type: MediaType = MediaType.IMAGE
     width: int
     height: int
     frame_index: int | None = None
     timestamp_seconds: float | None = None
+    source_path: str | None = None
+    parent_media_id: UUID | None = None
     created_at: datetime
 
 
 class ServerFolderImportCreate(BaseModel):
     parent_dir: str | None = None
     image_dir: str | None = None
+    video_dir: str | None = None
     label_dir: str | None = None
     mode: FolderImportMode = FolderImportMode.AUTO
+    source_type: ImportSourceType = ImportSourceType.MIXED_FOLDER
     task: AnnotationTask = AnnotationTask.VEHICLE
     duplicate_policy: DuplicatePolicy = DuplicatePolicy.SKIP
+    import_images: bool = True
+    import_videos: bool = False
+    extract_video_frames: bool = True
+    video_sample_every_seconds: float = Field(default=1.0, gt=0)
+    auto_annotate: bool = False
 
 
 class ServerFolderImportRead(BaseModel):
     id: UUID | None = None
     parent_dir: str | None = None
     image_dir: str | None = None
+    video_dir: str | None = None
     label_dir: str | None = None
+    source_type: ImportSourceType = ImportSourceType.MIXED_FOLDER
     task: AnnotationTask = AnnotationTask.VEHICLE
     duplicate_policy: DuplicatePolicy = DuplicatePolicy.SKIP
     imported_images: int = 0
+    imported_videos: int = 0
+    imported_frames: int = 0
     imported_annotations: int = 0
+    model_annotations: int = 0
     skipped_images: int = 0
     media: list[MediaRead] = Field(default_factory=list)
     issues: list[ImportIssue] = Field(default_factory=list)
@@ -123,11 +152,16 @@ class ImportSessionRead(BaseModel):
     dataset_id: UUID
     parent_dir: str | None = None
     image_dir: str
+    video_dir: str | None = None
     label_dir: str | None = None
+    source_type: ImportSourceType
     task: AnnotationTask
     duplicate_policy: DuplicatePolicy
     imported_images: int
+    imported_videos: int
+    imported_frames: int
     imported_annotations: int
+    model_annotations: int
     skipped_images: int
     issue_count: int
     created_at: datetime

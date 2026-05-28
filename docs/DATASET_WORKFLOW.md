@@ -14,6 +14,18 @@ dataset/
 Import should preserve valid image and label pairs and produce an issue report
 for incomplete samples.
 
+The preferred local workflow is backend folder import:
+
+```text
+dataset/
+  images/
+  labels/
+  videos/
+```
+
+The user may also provide separate image, label, and video folder paths. Missing
+labels are not fatal; those images remain in the review queue.
+
 ## Validation Rules
 
 A YOLO label row is valid when:
@@ -34,6 +46,11 @@ Samples enter the annotation queue when:
 - One or more label rows are invalid.
 - The image has no matching label file.
 - Duplicate images need review.
+
+Existing valid YOLO labels are stored as pre-fetched annotations. AI-generated
+boxes are stored as draft model suggestions. Human acceptance sets verification
+metadata without erasing whether the box originally came from import, model, or
+manual work.
 
 ## Export
 

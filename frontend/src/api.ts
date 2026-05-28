@@ -16,10 +16,12 @@ type ApiMedia = {
   dataset_id: string;
   file_name: string;
   image_url: string;
+  media_type: "image" | "video";
   width: number;
   height: number;
   frame_index?: number | null;
   timestamp_seconds?: number | null;
+  parent_media_id?: string | null;
 };
 
 type ApiAnnotation = {
@@ -36,17 +38,24 @@ type ApiAnnotation = {
   confidence?: number | null;
   source: "manual" | "model" | "import";
   status: "draft" | "accepted" | "rejected";
+  is_prefetched?: boolean;
+  reviewed_by_user?: string | null;
+  verified_at?: string | null;
 };
 
 type ApiServerImportResult = {
   id?: string | null;
   parent_dir?: string | null;
   image_dir?: string | null;
+  video_dir?: string | null;
   label_dir?: string | null;
   task: AnnotationTask;
   duplicate_policy: "skip" | "import_copy";
   imported_images: number;
+  imported_videos: number;
+  imported_frames: number;
   imported_annotations: number;
+  model_annotations: number;
   skipped_images: number;
   media: ApiMedia[];
   issues: Array<{
@@ -61,11 +70,15 @@ type ApiImportHistoryItem = {
   dataset_id: string;
   parent_dir?: string | null;
   image_dir: string;
+  video_dir?: string | null;
   label_dir?: string | null;
   task: AnnotationTask;
   duplicate_policy: "skip" | "import_copy";
   imported_images: number;
+  imported_videos: number;
+  imported_frames: number;
   imported_annotations: number;
+  model_annotations: number;
   skipped_images: number;
   issue_count: number;
   created_at: string;
@@ -74,11 +87,15 @@ type ApiImportHistoryItem = {
 export type ImportHistoryItem = {
   id: string;
   imageDir: string;
+  videoDir?: string | null;
   labelDir?: string | null;
   parentDir?: string | null;
   task: AnnotationTask;
   importedImages: number;
+  importedVideos: number;
+  importedFrames: number;
   importedAnnotations: number;
+  modelAnnotations: number;
   skippedImages: number;
   issueCount: number;
   createdAt: string;
@@ -104,10 +121,12 @@ export async function listMedia(datasetId: string): Promise<MediaSample[]> {
     id: item.id,
     fileName: item.file_name,
     imageUrl: item.image_url,
+    mediaType: item.media_type,
     width: item.width,
     height: item.height,
     frameIndex: item.frame_index ?? undefined,
-    timestampSeconds: item.timestamp_seconds ?? undefined
+    timestampSeconds: item.timestamp_seconds ?? undefined,
+    parentMediaId: item.parent_media_id ?? undefined
   }));
 }
 
@@ -122,6 +141,7 @@ export async function uploadImages(datasetId: string, files: FileList): Promise<
     id: item.id,
     fileName: item.file_name,
     imageUrl: item.image_url,
+    mediaType: item.media_type,
     width: item.width,
     height: item.height
   }));
@@ -131,36 +151,54 @@ export async function importServerFolder(
   datasetId: string,
   parentDir: string,
   imageDir: string,
+  videoDir: string,
   labelDir: string,
   task: AnnotationTask,
   mode: "auto" | "explicit",
-  duplicatePolicy: "skip" | "import_copy"
+  duplicatePolicy: "skip" | "import_copy",
+  importImages: boolean,
+  importVideos: boolean,
+  extractVideoFrames: boolean,
+  sampleEverySeconds: number,
+  autoAnnotate: boolean
 ) {
   const result = await request<ApiServerImportResult>(`/api/media/${datasetId}/server-folder`, {
     method: "POST",
     body: JSON.stringify({
       parent_dir: parentDir.trim() ? parentDir : null,
       image_dir: imageDir.trim() ? imageDir : null,
+      video_dir: videoDir.trim() ? videoDir : null,
       label_dir: labelDir.trim() ? labelDir : null,
       task: task,
       mode: mode,
-      duplicate_policy: duplicatePolicy
+      duplicate_policy: duplicatePolicy,
+      source_type: importImages && importVideos ? "mixed_folder" : importVideos ? "video_folder" : "image_folder",
+      import_images: importImages,
+      import_videos: importVideos,
+      extract_video_frames: extractVideoFrames,
+      video_sample_every_seconds: sampleEverySeconds,
+      auto_annotate: autoAnnotate
     })
   });
 
   return {
     importedImages: result.imported_images,
+    importedVideos: result.imported_videos,
+    importedFrames: result.imported_frames,
     importedAnnotations: result.imported_annotations,
+    modelAnnotations: result.model_annotations,
     skippedImages: result.skipped_images,
     issueCount: result.issues.length,
     media: result.media.map((item) => ({
       id: item.id,
       fileName: item.file_name,
       imageUrl: item.image_url,
+      mediaType: item.media_type,
       width: item.width,
       height: item.height,
       frameIndex: item.frame_index ?? undefined,
-      timestampSeconds: item.timestamp_seconds ?? undefined
+      timestampSeconds: item.timestamp_seconds ?? undefined,
+      parentMediaId: item.parent_media_id ?? undefined
     }))
   };
 }
@@ -171,10 +209,14 @@ export async function listImportHistory(datasetId: string): Promise<ImportHistor
     id: item.id,
     parentDir: item.parent_dir,
     imageDir: item.image_dir,
+    videoDir: item.video_dir,
     labelDir: item.label_dir,
     task: item.task,
     importedImages: item.imported_images,
+    importedVideos: item.imported_videos,
+    importedFrames: item.imported_frames,
     importedAnnotations: item.imported_annotations,
+    modelAnnotations: item.model_annotations,
     skippedImages: item.skipped_images,
     issueCount: item.issue_count,
     createdAt: item.created_at
@@ -220,7 +262,10 @@ function fromApiAnnotation(annotation: ApiAnnotation): Annotation {
     box: fromApiBox(annotation.box),
     confidence: annotation.confidence ?? undefined,
     source: annotation.source,
-    status: annotation.status
+    status: annotation.status,
+    isPrefetched: annotation.is_prefetched ?? false,
+    reviewedByUser: annotation.reviewed_by_user ?? null,
+    verifiedAt: annotation.verified_at ?? null
   };
 }
 
@@ -232,7 +277,10 @@ function toApiAnnotation(mediaId: string, annotation: Annotation) {
     box: toApiBox(annotation.box),
     confidence: annotation.confidence ?? null,
     source: annotation.source,
-    status: annotation.status
+    status: annotation.status,
+    is_prefetched: annotation.isPrefetched ?? false,
+    reviewed_by_user: annotation.reviewedByUser ?? null,
+    verified_at: annotation.verifiedAt ?? null
   };
 }
 

@@ -51,6 +51,9 @@ def replace_annotations(
             confidence=annotation.confidence,
             source=annotation.source,
             status=annotation.status,
+            is_prefetched=annotation.is_prefetched,
+            reviewed_by_user=annotation.reviewed_by_user,
+            verified_at=annotation.verified_at,
             updated_at=datetime.utcnow(),
         )
         db.add(saved_annotation)
@@ -84,6 +87,9 @@ def annotation_to_read(annotation: models.Annotation) -> AnnotationRead:
         confidence=annotation.confidence,
         source=annotation.source,
         status=annotation.status,
+        is_prefetched=annotation.is_prefetched,
+        reviewed_by_user=annotation.reviewed_by_user,
+        verified_at=annotation.verified_at,
         created_at=annotation.created_at,
         updated_at=annotation.updated_at,
     )

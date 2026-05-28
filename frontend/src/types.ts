@@ -25,14 +25,19 @@ export type Annotation = {
   confidence?: number;
   source: AnnotationSource;
   status: AnnotationStatus;
+  isPrefetched?: boolean;
+  reviewedByUser?: string | null;
+  verifiedAt?: string | null;
 };
 
 export type MediaSample = {
   id: string;
   fileName: string;
   imageUrl: string;
+  mediaType: "image" | "video";
   width: number;
   height: number;
   frameIndex?: number;
   timestampSeconds?: number;
+  parentMediaId?: string;
 };

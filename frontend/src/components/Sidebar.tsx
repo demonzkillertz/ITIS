@@ -56,7 +56,9 @@ export default function Sidebar({
             onClick={() => onSelectAnnotation(annotation.id)}
           >
             <span>{annotation.className}</span>
-            <small>{annotation.status}</small>
+            <small>
+              {annotation.isPrefetched ? "prefetch" : annotation.source} / {annotation.status}
+            </small>
           </button>
         ))}
         {annotations.length === 0 ? <p className="empty-state">No labels</p> : null}

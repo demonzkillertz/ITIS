@@ -33,12 +33,14 @@ Core entities:
 ## Processing Pipeline
 
 1. User uploads images, videos, or dataset archive.
-2. API stores the upload and creates a processing job.
-3. Worker extracts frames if the source is video.
-4. Worker runs vehicle and number plate models.
-5. Draft annotations are stored with confidence and source metadata.
-6. Human reviewer accepts, edits, or rejects annotations.
-7. Export creates YOLO-compatible folders and `data.yaml`.
+2. For large local datasets, user provides backend-accessible folder paths.
+3. API records an import session and copies/scans selected source media.
+4. Existing YOLO labels are imported as pre-fetched annotations.
+5. Worker extracts frames if the source is video.
+6. Worker runs vehicle and number plate models when AI assistance is enabled.
+7. Draft annotations are stored with confidence and source metadata.
+8. Human reviewer accepts, edits, or rejects annotations.
+9. Export creates YOLO-compatible folders and `data.yaml`.
 
 ## Annotation State
 
@@ -49,7 +51,10 @@ Annotations should carry enough metadata to support review:
 - Normalized box coordinates
 - `confidence`
 - `source`: manual, model, or import
+- `is_prefetched`: true for labels imported from existing YOLO text files
 - `status`: draft, accepted, rejected
+- `reviewed_by_user`
+- `verified_at`
 - `created_at` and `updated_at`
 
 ## Storage Strategy
@@ -67,6 +72,21 @@ storage/
 
 The application should reference files by stable database IDs and relative
 storage keys, not by absolute paths.
+
+Original server source paths are retained as metadata for import history and
+traceability. Browser rendering always uses copied app-storage paths.
+
+## Workstation Processing
+
+Target local workstation:
+
+- Intel i9-10850K
+- 64 GB RAM
+- NVIDIA RTX 3060 12 GB
+
+Frame extraction should use CPU parallelism. YOLO inference should be queued so
+GPU work is batched and does not block the browser API. Import sessions,
+processing jobs, and annotation status make interrupted work resumable.
 
 ## Reliability
 

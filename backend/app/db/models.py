@@ -2,13 +2,20 @@ from datetime import datetime
 from uuid import UUID as PythonUUID
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.domain.classes import AnnotationTask
-from app.domain.schemas import AnnotationSource, AnnotationStatus, DuplicatePolicy, JobStatus
+from app.domain.schemas import (
+    AnnotationSource,
+    AnnotationStatus,
+    DuplicatePolicy,
+    ImportSourceType,
+    JobStatus,
+    MediaType,
+)
 
 
 class Dataset(Base):
@@ -30,6 +37,10 @@ class MediaItem(Base):
     dataset_id: Mapped[PythonUUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(20), default=MediaType.IMAGE.value)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    import_session_id: Mapped[PythonUUID | None] = mapped_column(UUID(as_uuid=True))
+    parent_media_id: Mapped[PythonUUID | None] = mapped_column(UUID(as_uuid=True))
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
     frame_index: Mapped[int | None] = mapped_column(Integer)
@@ -54,6 +65,9 @@ class Annotation(Base):
     confidence: Mapped[float | None] = mapped_column(Float)
     source: Mapped[AnnotationSource] = mapped_column(Enum(AnnotationSource), nullable=False)
     status: Mapped[AnnotationStatus] = mapped_column(Enum(AnnotationStatus), nullable=False)
+    is_prefetched: Mapped[bool] = mapped_column(Boolean, default=False)
+    reviewed_by_user: Mapped[str | None] = mapped_column(String(120))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -89,11 +103,16 @@ class ImportSession(Base):
     dataset_id: Mapped[PythonUUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
     parent_dir: Mapped[str | None] = mapped_column(Text)
     image_dir: Mapped[str] = mapped_column(Text, nullable=False)
+    video_dir: Mapped[str | None] = mapped_column(Text)
     label_dir: Mapped[str | None] = mapped_column(Text)
+    source_type: Mapped[ImportSourceType] = mapped_column(Enum(ImportSourceType), nullable=False)
     task: Mapped[AnnotationTask] = mapped_column(Enum(AnnotationTask), nullable=False)
     duplicate_policy: Mapped[DuplicatePolicy] = mapped_column(Enum(DuplicatePolicy), nullable=False)
     imported_images: Mapped[int] = mapped_column(Integer, default=0)
+    imported_videos: Mapped[int] = mapped_column(Integer, default=0)
+    imported_frames: Mapped[int] = mapped_column(Integer, default=0)
     imported_annotations: Mapped[int] = mapped_column(Integer, default=0)
+    model_annotations: Mapped[int] = mapped_column(Integer, default=0)
     skipped_images: Mapped[int] = mapped_column(Integer, default=0)
     issue_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -14,6 +14,7 @@ export const sampleMedia: MediaSample[] = [
     fileName: "traffic_frame_001.jpg",
     imageUrl:
       "https://images.unsplash.com/photo-1502877338535-766e1452684a?auto=format&fit=crop&w=1400&q=80",
+    mediaType: "image",
     width: 1400,
     height: 933,
     frameIndex: 1,
@@ -24,6 +25,7 @@ export const sampleMedia: MediaSample[] = [
     fileName: "traffic_frame_002.jpg",
     imageUrl:
       "https://images.unsplash.com/photo-1494522855154-9297ac14b55f?auto=format&fit=crop&w=1400&q=80",
+    mediaType: "image",
     width: 1400,
     height: 933,
     frameIndex: 2,
