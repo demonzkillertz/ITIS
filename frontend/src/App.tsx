@@ -21,7 +21,6 @@ import {
   ensureDataset,
   extractFrames,
   importImageFolder,
-  importServerFolder,
   importVideoFolder,
   listAnnotations,
   listImportHistory,
@@ -67,11 +66,9 @@ export default function App() {
   const [imageDir, setImageDir] = useState("");
   const [videoDir, setVideoDir] = useState("");
   const [labelDir, setLabelDir] = useState("");
-  const [importTask, setImportTask] = useState<"vehicle" | "plate">("vehicle");
   const [importMode, setImportMode] = useState<"auto" | "explicit">("auto");
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "import_copy">("skip");
-  const [importImages, setImportImages] = useState(true);
-  const [importVideos, setImportVideos] = useState(false);
+  const [frameSampleSeconds, setFrameSampleSeconds] = useState(1);
   const [vehicleModelKey, setVehicleModelKey] = useState("custom_vehicle");
   const [plateModelKey, setPlateModelKey] = useState("custom_plate");
 
@@ -151,6 +148,10 @@ export default function App() {
     () => annotations.find((annotation) => annotation.id === selectedAnnotationId) ?? null,
     [annotations, selectedAnnotationId]
   );
+  const importedLabelCount = useMemo(
+    () => annotations.filter((annotation) => annotation.source === "import").length,
+    [annotations]
+  );
 
   useEffect(() => {
     let active = true;
@@ -192,19 +193,21 @@ export default function App() {
   }, [annotationsByMedia, media]);
 
   function importPayloadIsValid() {
-    if (!importImages && !importVideos) {
-      setStatus("Choose images, videos, or both");
+    const scanningImages = activeTab === "images";
+    const scanningVideos = activeTab === "videos";
+    if (!scanningImages && !scanningVideos) {
+      setStatus("Open Image Import or Video Frames before scanning");
       return false;
     }
-    if (importMode === "auto" && !parentDir.trim() && !imageDir.trim() && !videoDir.trim()) {
-      setStatus("Enter a parent, image, or video folder path");
+    if (importMode === "auto" && !parentDir.trim() && !(scanningImages ? imageDir : videoDir).trim()) {
+      setStatus(scanningImages ? "Enter a parent or image folder path" : "Enter a parent or video folder path");
       return false;
     }
-    if (importMode === "explicit" && importImages && !imageDir.trim()) {
+    if (importMode === "explicit" && scanningImages && !imageDir.trim()) {
       setStatus("Enter an image folder path");
       return false;
     }
-    if (importMode === "explicit" && importVideos && !videoDir.trim()) {
+    if (importMode === "explicit" && scanningVideos && !videoDir.trim()) {
       setStatus("Enter a video folder path");
       return false;
     }
@@ -239,52 +242,35 @@ export default function App() {
     if (!datasetId || !importPayloadIsValid()) {
       return;
     }
-    await runWithProgress("Scanning and saving server folders", async () => {
+    const scanningImages = activeTab === "images";
+    await runWithProgress(scanningImages ? "Scanning images and importing labels" : "Scanning video folder", async () => {
       const result =
-        activeTab === "images" && !importVideos
+        scanningImages
           ? await importImageFolder(
               datasetId,
               parentDir,
               imageDir,
               labelDir,
-                importTask,
-                importMode,
-                duplicatePolicy,
-                false,
-                vehicleModelKey,
-                plateModelKey
+              "plate",
+              importMode,
+              duplicatePolicy,
+              false,
+              vehicleModelKey,
+              plateModelKey
             )
-          : activeTab === "videos" && !importImages
-            ? await importVideoFolder(
-                datasetId,
-                parentDir,
-                videoDir,
-                importTask,
-                importMode,
-                duplicatePolicy,
-                false,
-                1,
-                false,
-                vehicleModelKey,
-                plateModelKey
-              )
-            : await importServerFolder(
-                datasetId,
-                parentDir,
-                imageDir,
-                videoDir,
-                labelDir,
-                importTask,
-                importMode,
-                duplicatePolicy,
-                importImages,
-                importVideos,
-                false,
-                1,
-                false,
-                vehicleModelKey,
-                plateModelKey
-              );
+          : await importVideoFolder(
+              datasetId,
+              parentDir,
+              videoDir,
+              "vehicle",
+              importMode,
+              duplicatePolicy,
+              false,
+              frameSampleSeconds,
+              false,
+              vehicleModelKey,
+              plateModelKey
+            );
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
       setOpenFolder(null);
@@ -297,20 +283,18 @@ export default function App() {
         issue_count: result.issueCount
       });
       setStatus(
-        `Saved ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames`
+        scanningImages
+          ? `Saved ${result.importedImages} images and imported ${result.importedAnnotations} labels`
+          : `Saved ${result.importedVideos} videos. Extract frames from Media.`
       );
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Scan failed"));
   }
 
   function openImageImport() {
-    setImportImages(true);
-    setImportVideos(false);
     setActiveTab("images");
   }
 
   function openVideoImport() {
-    setImportImages(false);
-    setImportVideos(true);
     setActiveTab("videos");
   }
 
@@ -337,9 +321,9 @@ export default function App() {
     await runWithProgress(`Extracting frames from ${video.fileName}`, async () => {
       const result = await extractFrames(
         video.id,
-        1,
+        frameSampleSeconds,
         withAi,
-        withAi ? ["vehicle", "plate"] : [importTask],
+        withAi ? ["vehicle", "plate"] : ["vehicle"],
         vehicleModelKey,
         plateModelKey
       );
@@ -623,8 +607,8 @@ export default function App() {
               </strong>
             </div>
             <div className="metric-row">
-              <span>Prefetch</span>
-              <strong>{annotations.filter((item) => item.isPrefetched).length}</strong>
+              <span>Imported</span>
+              <strong>{importedLabelCount}</strong>
             </div>
             <div className="metric-row">
               <span>Verified</span>
@@ -641,6 +625,10 @@ export default function App() {
                 <button onClick={() => handleAiSuggestion(media, "plate")} disabled={isProcessing}>
                   <Wand2 size={16} />
                   AI plate
+                </button>
+                <button onClick={() => handleAiBoth(media)} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI both
                 </button>
               </div>
             ) : null}
@@ -798,8 +786,8 @@ export default function App() {
             </div>
             <div className="workflow-note">
               {activeTab === "images"
-                ? "Use this for completed, partial, or unlabeled image datasets. Scan saves database records and matches labels by image filename stem."
-                : "Use this for traffic videos. Scan only saves video records; open Media to extract smart vehicle-change frames from a selected video."}
+                ? "Scan images from a server folder. If a matching YOLO label file exists in the labels folder, it is imported as a number plate label."
+                : "Scan only video files here. Frame extraction happens later from Media using the selected vehicle model and interval."}
             </div>
             <div className="import-grid">
               <label>
@@ -820,7 +808,7 @@ export default function App() {
                   placeholder="C:\\datasets\\traffic"
                 />
               </label>
-              {importImages ? (
+              {activeTab === "images" ? (
                 <>
                   <label>
                     <span>Images</span>
@@ -840,7 +828,7 @@ export default function App() {
                   </label>
                 </>
               ) : null}
-              {importVideos ? (
+              {activeTab === "videos" ? (
                 <>
                   <label>
                     <span>Videos</span>
@@ -850,19 +838,18 @@ export default function App() {
                       placeholder="C:\\datasets\\traffic\\videos"
                     />
                   </label>
+                  <label>
+                    <span>Frame interval seconds</span>
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={frameSampleSeconds}
+                      onChange={(event) => setFrameSampleSeconds(clamp(Number(event.target.value), 0.1, 60))}
+                    />
+                  </label>
+                  {modelSelect("vehicle")}
                 </>
-              ) : null}
-              {importImages ? (
-                <label>
-                  <span>Label task</span>
-                  <select
-                    value={importTask}
-                    onChange={(event) => setImportTask(event.target.value as "vehicle" | "plate")}
-                  >
-                    <option value="vehicle">Vehicle</option>
-                    <option value="plate">Number plate</option>
-                  </select>
-                </label>
               ) : null}
               <label>
                 <span>Duplicates</span>
@@ -878,29 +865,10 @@ export default function App() {
               </label>
             </div>
 
-            <div className="option-strip">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={importImages}
-                  onChange={(event) => setImportImages(event.target.checked)}
-                />
-                Images
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={importVideos}
-                  onChange={(event) => setImportVideos(event.target.checked)}
-                />
-                Videos
-              </label>
-            </div>
-
             <div className="action-row">
               <button onClick={handleScan}>
                 <FolderSearch size={17} />
-                Scan
+                {activeTab === "images" ? "Scan images and labels" : "Scan videos"}
               </button>
               <span>{status}</span>
             </div>
@@ -990,6 +958,7 @@ export default function App() {
                   </div>
                   <span>{item.fileName}</span>
                   <FrameStatus count={frameCountForVideo(annotatableMedia, item.id)} />
+                  <small>Interval {frameSampleSeconds}s with selected vehicle model</small>
                   <div className="card-actions">
                     <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
                     <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Smart frames</button>

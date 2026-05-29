@@ -157,6 +157,7 @@ def import_server_folder(
     db.flush()
 
     if payload.import_images and image_dir is not None:
+        label_paths_by_stem = build_label_index(label_dir) if label_dir is not None else {}
         for image_path in sorted(image_dir.rglob("*")):
             if not image_path.is_file() or image_path.suffix.lower() not in IMAGE_EXTENSIONS:
                 continue
@@ -173,7 +174,13 @@ def import_server_folder(
                 continue
             saved_items.append(media_item)
             if label_dir is not None:
-                import_labels_for_media(db, media_item, label_dir / f"{image_path.stem}.txt", payload, report)
+                import_labels_for_media(
+                    db,
+                    media_item,
+                    label_paths_by_stem.get(image_path.stem, label_dir / f"{image_path.stem}.txt"),
+                    payload,
+                    report,
+                )
             if payload.auto_annotate:
                 for task in tasks_for_payload(payload):
                     model_key = payload.vehicle_model_key if task == AnnotationTask.VEHICLE else payload.plate_model_key
@@ -825,7 +832,7 @@ def extract_video_frames(
         return []
 
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 25)
-    step = max(1, int(fps * 0.5))
+    step = max(1, int(fps * payload.video_sample_every_seconds))
     frames: list[models.MediaItem] = []
     frame_number = 0
     saved_index = 0
@@ -1001,6 +1008,14 @@ def import_labels_for_media(
             )
         )
         report.imported_annotations += 1
+
+
+def build_label_index(label_dir: Path) -> dict[str, Path]:
+    labels: dict[str, Path] = {}
+    for label_path in sorted(label_dir.rglob("*.txt")):
+        if label_path.is_file() and label_path.stem not in labels:
+            labels[label_path.stem] = label_path
+    return labels
 
 
 def media_to_read(item: models.MediaItem) -> MediaRead:
