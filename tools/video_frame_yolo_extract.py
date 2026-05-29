@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import tomllib
 from pathlib import Path
 
 import cv2
@@ -25,19 +26,68 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Extract frames and YOLO labels from a video.")
-    parser.add_argument("video", type=Path, help="Input video path")
-    parser.add_argument("--output", type=Path, required=True, help="Output dataset folder")
+    parser.add_argument("--config", type=Path, default=Path("tools/video_frame_yolo_extract.conf"))
+    parser.add_argument("--video", type=Path, default=None, help="Input video path")
+    parser.add_argument("--output", type=Path, default=None, help="Output dataset folder")
     parser.add_argument("--model", type=Path, default=None, help="Optional YOLO .pt model path")
-    parser.add_argument("--task", choices=["vehicle", "plate"], default="plate")
-    parser.add_argument("--fps", type=float, default=2.0, help="How many frames per second to inspect")
-    parser.add_argument("--conf", type=float, default=0.25, help="YOLO confidence threshold")
-    parser.add_argument("--imgsz", type=int, default=640, help="YOLO inference image size")
+    parser.add_argument("--task", choices=["vehicle", "plate"], default=None)
+    parser.add_argument("--fps", type=float, default=None, help="How many frames per second to inspect")
+    parser.add_argument("--conf", type=float, default=None, help="YOLO confidence threshold")
+    parser.add_argument("--imgsz", type=int, default=None, help="YOLO inference image size")
     parser.add_argument("--device", default=None, help="YOLO device, for example cuda:0 or cpu")
-    parser.add_argument("--base-coco", action="store_true", help="Map COCO vehicle classes to ITIS vehicle classes")
-    parser.add_argument("--keep-empty", action="store_true", help="Keep frames even when no labels are detected")
-    parser.add_argument("--min-change", type=float, default=6.0, help="Mean pixel diff needed to keep a near-duplicate frame")
-    parser.add_argument("--jpg-quality", type=int, default=92)
-    return parser.parse_args()
+    parser.add_argument("--base-coco", action="store_true", default=None, help="Map COCO vehicle classes to ITIS vehicle classes")
+    parser.add_argument("--keep-empty", action="store_true", default=None, help="Keep frames even when no labels are detected")
+    parser.add_argument("--min-change", type=float, default=None, help="Mean pixel diff needed to keep a near-duplicate frame")
+    parser.add_argument("--jpg-quality", type=int, default=None)
+    return merge_config(parser.parse_args())
+
+
+def merge_config(args: argparse.Namespace) -> argparse.Namespace:
+    config = load_config(args.config)
+    defaults = {
+        "video": None,
+        "output": None,
+        "model": None,
+        "task": "plate",
+        "fps": 2.0,
+        "conf": 0.25,
+        "imgsz": 640,
+        "device": None,
+        "base_coco": False,
+        "keep_empty": False,
+        "min_change": 6.0,
+        "jpg_quality": 92,
+    }
+    merged = {**defaults, **config}
+    for key in defaults:
+        value = getattr(args, key, None)
+        if value is not None:
+            merged[key] = value
+
+    if merged["video"] is None:
+        raise ValueError("Set video in the config file or pass --video")
+    if merged["output"] is None:
+        raise ValueError("Set output in the config file or pass --output")
+    if merged["task"] not in {"vehicle", "plate"}:
+        raise ValueError("task must be vehicle or plate")
+
+    for key in ("video", "output", "model"):
+        if merged[key] is not None:
+            if key == "model" and str(merged[key]).strip() == "":
+                merged[key] = None
+                continue
+            merged[key] = Path(merged[key])
+    if merged["device"] == "":
+        merged["device"] = None
+    return argparse.Namespace(**merged)
+
+
+def load_config(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    with path.open("rb") as config_file:
+        raw = tomllib.load(config_file)
+    return raw.get("extract", raw)
 
 
 def safe_name(value: str) -> str:
