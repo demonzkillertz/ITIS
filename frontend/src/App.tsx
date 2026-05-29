@@ -10,13 +10,17 @@ import {
   ImagePlus,
   ListChecks,
   Save,
+  Square,
+  SquareCheck,
   Trash2,
   Wand2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import {
   autoAnnotateMedia,
+  deleteMedia,
   downloadModels,
   ensureDataset,
   extractFrames,
@@ -45,11 +49,12 @@ type ScanResult = {
 type OpenFolder = { kind: "import" | "video"; id: string } | null;
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState("Traffic Annotation Dataset");
   const [mediaItems, setMediaItems] = useState<MediaSample[]>([]);
   const [screen, setScreen] = useState<"home" | "annotate">("home");
-  const [activeTab, setActiveTab] = useState<"dashboard" | "images" | "videos" | "media" | "history">("dashboard");
   const [mediaIndex, setMediaIndex] = useState(0);
   const [selectedClass, setSelectedClass] = useState<AnnotationClass>(classes[2]);
   const [annotationsByMedia, setAnnotationsByMedia] = useState<Record<string, Annotation[]>>({});
@@ -68,9 +73,23 @@ export default function App() {
   const [labelDir, setLabelDir] = useState("");
   const [importMode, setImportMode] = useState<"auto" | "explicit">("auto");
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "import_copy">("skip");
-  const [frameSampleSeconds, setFrameSampleSeconds] = useState(1);
+  const [frameSampleFps, setFrameSampleFps] = useState(30);
   const [vehicleModelKey, setVehicleModelKey] = useState("custom_vehicle");
   const [plateModelKey, setPlateModelKey] = useState("custom_plate");
+  const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
+  const [folderAliases, setFolderAliases] = useState<Record<string, string>>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("itis.folderAliases") ?? "{}") as Record<string, string>;
+    } catch {
+      return {};
+    }
+  });
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const activeTab = tabFromPath(location.pathname);
+  const setActiveTab = (tab: "dashboard" | "images" | "videos" | "media" | "history") => {
+    navigate(tab === "dashboard" ? "/dashboard" : `/${tab}`);
+  };
 
   const annotatableMedia = useMemo(
     () => mediaItems.filter((item) => item.mediaType === "image"),
@@ -152,6 +171,14 @@ export default function App() {
     () => annotations.filter((annotation) => annotation.source === "import").length,
     [annotations]
   );
+  const visibleFrameIds = useMemo(() => visibleFrames.map((item) => item.id), [visibleFrames]);
+  const selectedVisibleCount = useMemo(
+    () => visibleFrameIds.filter((id) => selectedMediaIds.has(id)).length,
+    [selectedMediaIds, visibleFrameIds]
+  );
+  const bulkProgressPercent = bulkProgress?.total
+    ? Math.round((bulkProgress.done / bulkProgress.total) * 100)
+    : 0;
 
   useEffect(() => {
     let active = true;
@@ -191,6 +218,10 @@ export default function App() {
       })
       .catch((error) => setStatus(error.message));
   }, [annotationsByMedia, media]);
+
+  useEffect(() => {
+    window.localStorage.setItem("itis.folderAliases", JSON.stringify(folderAliases));
+  }, [folderAliases]);
 
   function importPayloadIsValid() {
     const scanningImages = activeTab === "images";
@@ -266,7 +297,7 @@ export default function App() {
               importMode,
               duplicatePolicy,
               false,
-              frameSampleSeconds,
+              1 / frameSampleFps,
               false,
               vehicleModelKey,
               plateModelKey
@@ -321,7 +352,7 @@ export default function App() {
     await runWithProgress(`Extracting frames from ${video.fileName}`, async () => {
       const result = await extractFrames(
         video.id,
-        frameSampleSeconds,
+        1 / frameSampleFps,
         withAi,
         withAi ? ["vehicle", "plate"] : ["vehicle"],
         vehicleModelKey,
@@ -358,17 +389,86 @@ export default function App() {
   }
 
   async function handleBulkAiBoth() {
-    if (annotatableMedia.length === 0) {
+    const targets = selectedMediaIds.size
+      ? annotatableMedia.filter((item) => selectedMediaIds.has(item.id))
+      : visibleFrames.length
+        ? visibleFrames
+        : annotatableMedia;
+    await handleBulkAiBothFor(targets);
+  }
+
+  async function handleBulkAiBothFor(targets: MediaSample[]) {
+    if (targets.length === 0) {
       return;
     }
-    await runWithProgress("Creating vehicle and plate suggestions for all images", async () => {
-      for (const item of annotatableMedia) {
+    await runWithProgress("Creating vehicle and plate suggestions", async () => {
+      setBulkProgress({ done: 0, total: targets.length });
+      for (const [index, item] of targets.entries()) {
         await autoAnnotateMedia(item.id, "vehicle", vehicleModelKey);
         await autoAnnotateMedia(item.id, "plate", plateModelKey);
+        setBulkProgress({ done: index + 1, total: targets.length });
       }
       setAnnotationsByMedia({});
-      setStatus(`AI suggestions created for ${annotatableMedia.length} image${annotatableMedia.length === 1 ? "" : "s"}`);
+      setStatus(`AI suggestions created for ${targets.length} image${targets.length === 1 ? "" : "s"}`);
+      setBulkProgress(null);
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Bulk AI suggestion failed"));
+  }
+
+  function toggleMediaSelection(mediaId: string) {
+    setSelectedMediaIds((current) => {
+      const next = new Set(current);
+      if (next.has(mediaId)) {
+        next.delete(mediaId);
+      } else {
+        next.add(mediaId);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectVisibleFrames() {
+    setSelectedMediaIds((current) => {
+      const next = new Set(current);
+      const allSelected = visibleFrameIds.length > 0 && visibleFrameIds.every((id) => next.has(id));
+      visibleFrameIds.forEach((id) => {
+        if (allSelected) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+      });
+      return next;
+    });
+  }
+
+  async function handleDeleteMediaItems(items: MediaSample[]) {
+    if (items.length === 0) {
+      return;
+    }
+    await runWithProgress(`Deleting ${items.length} image${items.length === 1 ? "" : "s"}`, async () => {
+      for (const item of items) {
+        await deleteMedia(item.id);
+      }
+      await refreshDataset(datasetId);
+      setAnnotationsByMedia((current) => {
+        const next = { ...current };
+        items.forEach((item) => delete next[item.id]);
+        return next;
+      });
+      setSelectedMediaIds((current) => {
+        const next = new Set(current);
+        items.forEach((item) => next.delete(item.id));
+        return next;
+      });
+      setStatus(`Deleted ${items.length} image${items.length === 1 ? "" : "s"}`);
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Delete failed"));
+  }
+
+  function renameOpenFolder(value: string) {
+    if (!openFolder) {
+      return;
+    }
+    setFolderAliases((current) => ({ ...current, [openFolder.id]: value }));
   }
 
   function goTo(delta: number) {
@@ -697,30 +797,33 @@ export default function App() {
 
       <main className="home-layout">
         {isProcessing ? <ProgressStrip label={processingLabel ?? "Processing"} /> : null}
+        {bulkProgress ? <ProgressStrip label={`AI annotation ${bulkProgressPercent}% (${bulkProgress.done}/${bulkProgress.total})`} /> : null}
         <nav className="dashboard-tabs" aria-label="Dashboard sections">
-          <button className={activeTab === "dashboard" ? "active" : ""} onClick={() => setActiveTab("dashboard")}>
+          <NavLink to="/dashboard" className={({ isActive }) => (isActive || location.pathname === "/" ? "active" : "")}>
             <BarChart3 size={17} />
             Dashboard
-          </button>
-          <button className={activeTab === "images" ? "active" : ""} onClick={openImageImport}>
+          </NavLink>
+          <NavLink to="/images" className={({ isActive }) => (isActive ? "active" : "")}>
             <ImagePlus size={17} />
             Image Import
-          </button>
-          <button className={activeTab === "videos" ? "active" : ""} onClick={openVideoImport}>
+          </NavLink>
+          <NavLink to="/videos" className={({ isActive }) => (isActive ? "active" : "")}>
             <Film size={17} />
             Video Frames
-          </button>
-          <button className={activeTab === "media" ? "active" : ""} onClick={() => setActiveTab("media")}>
+          </NavLink>
+          <NavLink to="/media" className={({ isActive }) => (isActive ? "active" : "")}>
             <GalleryHorizontalEnd size={17} />
             Media
-          </button>
-          <button className={activeTab === "history" ? "active" : ""} onClick={() => setActiveTab("history")}>
+          </NavLink>
+          <NavLink to="/history" className={({ isActive }) => (isActive ? "active" : "")}>
             <ListChecks size={17} />
             History
-          </button>
+          </NavLink>
         </nav>
 
-        {activeTab === "dashboard" ? (
+        <Routes>
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard" element={
           <section className="dashboard-surface">
             <div className="section-title">
               <BarChart3 size={20} />
@@ -776,9 +879,9 @@ export default function App() {
               </div>
             </div>
           </section>
-        ) : null}
+          } />
 
-        {activeTab === "images" || activeTab === "videos" ? (
+          <Route path="/images" element={
           <section className="import-surface">
             <div className="section-title">
               {activeTab === "images" ? <ImagePlus size={20} /> : <Film size={20} />}
@@ -828,29 +931,6 @@ export default function App() {
                   </label>
                 </>
               ) : null}
-              {activeTab === "videos" ? (
-                <>
-                  <label>
-                    <span>Videos</span>
-                    <input
-                      value={videoDir}
-                      onChange={(event) => setVideoDir(event.target.value)}
-                      placeholder="C:\\datasets\\traffic\\videos"
-                    />
-                  </label>
-                  <label>
-                    <span>Frame interval seconds</span>
-                    <input
-                      type="number"
-                      min="0.1"
-                      step="0.1"
-                      value={frameSampleSeconds}
-                      onChange={(event) => setFrameSampleSeconds(clamp(Number(event.target.value), 0.1, 60))}
-                    />
-                  </label>
-                  {modelSelect("vehicle")}
-                </>
-              ) : null}
               <label>
                 <span>Duplicates</span>
                 <select
@@ -898,9 +978,83 @@ export default function App() {
               </div>
             ) : null}
           </section>
-        ) : null}
+          } />
 
-        {activeTab === "media" ? (
+          <Route path="/videos" element={
+          <section className="import-surface">
+            <div className="section-title">
+              <Film size={20} />
+              <h2>Video Scan and Frame Extraction</h2>
+            </div>
+            <div className="workflow-note">
+              Scan only video files here. Frame extraction happens later from Media using the selected vehicle model and FPS.
+            </div>
+            <div className="import-grid">
+              <label>
+                <span>Mode</span>
+                <select
+                  value={importMode}
+                  onChange={(event) => setImportMode(event.target.value as "auto" | "explicit")}
+                >
+                  <option value="auto">Parent folder</option>
+                  <option value="explicit">Separate folders</option>
+                </select>
+              </label>
+              <label>
+                <span>Parent folder</span>
+                <input
+                  value={parentDir}
+                  onChange={(event) => setParentDir(event.target.value)}
+                  placeholder="C:\\datasets\\traffic"
+                />
+              </label>
+              <label>
+                <span>Videos</span>
+                <input
+                  value={videoDir}
+                  onChange={(event) => setVideoDir(event.target.value)}
+                  placeholder="C:\\datasets\\traffic\\videos"
+                />
+              </label>
+              <label>
+                <span>Analysis FPS</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  step="1"
+                  value={frameSampleFps}
+                  onChange={(event) => setFrameSampleFps(clamp(Number(event.target.value), 1, 60))}
+                />
+              </label>
+              {modelSelect("vehicle")}
+              <label>
+                <span>Duplicates</span>
+                <select
+                  value={duplicatePolicy}
+                  onChange={(event) =>
+                    setDuplicatePolicy(event.target.value as "skip" | "import_copy")
+                  }
+                >
+                  <option value="skip">Skip existing</option>
+                  <option value="import_copy">Import copies</option>
+                </select>
+              </label>
+            </div>
+
+            <div className="action-row">
+              <button onClick={handleScan}>
+                <FolderSearch size={17} />
+                Scan videos
+              </button>
+              <span>{status}</span>
+            </div>
+
+            {scanResult ? <ScanSummary scanResult={scanResult} /> : null}
+          </section>
+          } />
+
+          <Route path="/media" element={
           <section className="gallery-surface">
             <div className="section-title">
               <GalleryHorizontalEnd size={20} />
@@ -927,11 +1081,38 @@ export default function App() {
                   All media
                 </button>
               ) : null}
+              {visibleFrames.length > 0 ? (
+                <button onClick={toggleSelectVisibleFrames}>
+                  {selectedVisibleCount === visibleFrames.length ? <SquareCheck size={17} /> : <Square size={17} />}
+                  {selectedVisibleCount === visibleFrames.length ? "Clear visible" : "Select visible"}
+                </button>
+              ) : null}
               <button onClick={handleBulkAiBoth} disabled={isProcessing || annotatableMedia.length === 0}>
                 <Wand2 size={17} />
-                AI both all
+                {selectedMediaIds.size ? `AI both selected (${selectedMediaIds.size})` : "AI both all"}
               </button>
+              {selectedMediaIds.size ? (
+                <button
+                  onClick={() => handleDeleteMediaItems(annotatableMedia.filter((item) => selectedMediaIds.has(item.id)))}
+                  disabled={isProcessing}
+                >
+                  <Trash2 size={17} />
+                  Delete selected
+                </button>
+              ) : null}
             </div>
+            {openFolder ? (
+              <div className="folder-tools">
+                <label>
+                  <span>Folder display name</span>
+                  <input
+                    value={folderAliases[openFolder.id] ?? ""}
+                    onChange={(event) => renameOpenFolder(event.target.value)}
+                    placeholder="Rename this folder in the gallery"
+                  />
+                </label>
+              </div>
+            ) : null}
             <div className="gallery-grid home-gallery">
               {!openFolder
                 ? scanFolders.map((folder) => (
@@ -939,13 +1120,25 @@ export default function App() {
                       <div className="video-thumb">
                         <FolderSearch size={30} />
                       </div>
-                      <span>{folderLabel(folder.latest)}</span>
+                      <span>{folderAliases[folder.key] || folderLabel(folder.latest)}</span>
                       <small>
                         {folder.images} images, {folder.videos} videos, {folder.histories.length} scan{folder.histories.length === 1 ? "" : "s"}
                       </small>
                       <div className="card-actions">
                         <button onClick={() => setOpenFolder({ kind: "import", id: folder.key })}>
                           Open folder
+                        </button>
+                        <button onClick={() => {
+                          setOpenFolder({ kind: "import", id: folder.key });
+                          setSelectedMediaIds(new Set(folder.media.filter((item) => item.mediaType === "image").map((item) => item.id)));
+                        }}>
+                          Select images
+                        </button>
+                        <button
+                          onClick={() => handleBulkAiBothFor(folder.media.filter((item) => item.mediaType === "image"))}
+                          disabled={isProcessing || folder.images === 0}
+                        >
+                          AI folder
                         </button>
                       </div>
                     </div>
@@ -958,7 +1151,7 @@ export default function App() {
                   </div>
                   <span>{item.fileName}</span>
                   <FrameStatus count={frameCountForVideo(annotatableMedia, item.id)} />
-                  <small>Interval {frameSampleSeconds}s with selected vehicle model</small>
+                  <small>Analyze up to {frameSampleFps} fps with selected vehicle model</small>
                   <div className="card-actions">
                     <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
                     <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Smart frames</button>
@@ -967,7 +1160,10 @@ export default function App() {
                 </div>
               ))}
               {visibleFrames.map((item) => (
-                <div className="gallery-tile media-card" key={item.id}>
+                <div className={selectedMediaIds.has(item.id) ? "gallery-tile media-card selected" : "gallery-tile media-card"} key={item.id}>
+                  <button className="select-overlay" onClick={() => toggleMediaSelection(item.id)} title="Select image">
+                    {selectedMediaIds.has(item.id) ? <SquareCheck size={18} /> : <Square size={18} />}
+                  </button>
                   <img src={item.imageUrl} alt={item.fileName} />
                   <span>{item.fileName}</span>
                   {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
@@ -976,6 +1172,7 @@ export default function App() {
                     <button onClick={() => handleAiBoth(item)} disabled={isProcessing}>AI both</button>
                     <button onClick={() => handleAiSuggestion(item, "vehicle")} disabled={isProcessing}>Vehicle</button>
                     <button onClick={() => handleAiSuggestion(item, "plate")} disabled={isProcessing}>Plate</button>
+                    <button onClick={() => handleDeleteMediaItems([item])} disabled={isProcessing}>Delete</button>
                   </div>
                 </div>
               ))}
@@ -988,9 +1185,9 @@ export default function App() {
               ) : null}
             </div>
           </section>
-        ) : null}
+          } />
 
-        {activeTab === "history" ? (
+          <Route path="/history" element={
           <section className="history-surface full-history">
             <h2>Import History</h2>
             {importHistory.map((item) => (
@@ -1007,7 +1204,8 @@ export default function App() {
             ))}
             {importHistory.length === 0 ? <p>No imports yet</p> : null}
           </section>
-        ) : null}
+          } />
+        </Routes>
       </main>
     </div>
   );
@@ -1027,6 +1225,33 @@ function FrameStatus({ count }: { count: number }) {
     <small className={count > 0 ? "frame-status ready" : "frame-status empty"}>
       {count > 0 ? `Frames extracted: ${count}` : "Frames not extracted"}
     </small>
+  );
+}
+
+function ScanSummary({ scanResult }: { scanResult: ScanResult }) {
+  return (
+    <div className="scan-summary">
+      <div>
+        <span>Saved images</span>
+        <strong>{scanResult.image_count}</strong>
+      </div>
+      <div>
+        <span>Saved videos</span>
+        <strong>{scanResult.video_count}</strong>
+      </div>
+      <div>
+        <span>Frames</span>
+        <strong>{scanResult.frame_count}</strong>
+      </div>
+      <div>
+        <span>Labels</span>
+        <strong>{scanResult.label_count}</strong>
+      </div>
+      <div>
+        <span>Issues</span>
+        <strong>{scanResult.issue_count}</strong>
+      </div>
+    </div>
   );
 }
 
@@ -1061,4 +1286,12 @@ function normalizePath(path: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function tabFromPath(pathname: string): "dashboard" | "images" | "videos" | "media" | "history" {
+  const first = pathname.split("/").filter(Boolean)[0];
+  if (first === "images" || first === "videos" || first === "media" || first === "history") {
+    return first;
+  }
+  return "dashboard";
 }

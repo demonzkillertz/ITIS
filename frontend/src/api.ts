@@ -569,6 +569,12 @@ export async function autoAnnotateMedia(mediaId: string, task: AnnotationTask, m
   });
 }
 
+export async function deleteMedia(mediaId: string) {
+  return request<{ message?: string }>(`/api/media/item/${mediaId}`, {
+    method: "DELETE"
+  });
+}
+
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {

@@ -120,7 +120,8 @@ h2 {
   padding-bottom: 2px;
 }
 
-.dashboard-tabs button {
+.dashboard-tabs button,
+.dashboard-tabs a {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -130,10 +131,12 @@ h2 {
   border-radius: 6px;
   color: #cbd5e1;
   background: #121b2a;
+  text-decoration: none;
   white-space: nowrap;
 }
 
-.dashboard-tabs button.active {
+.dashboard-tabs button.active,
+.dashboard-tabs a.active {
   border-color: #38bdf8;
   color: #f8fafc;
   background: #075985;
@@ -311,6 +314,30 @@ h2 {
 .action-row span {
   min-width: 0;
   color: #9fb2c8;
+}
+
+.folder-tools {
+  display: grid;
+  margin-top: 12px;
+  max-width: 420px;
+}
+
+.folder-tools label {
+  display: grid;
+  gap: 6px;
+  color: #dbeafe;
+  font-size: 0.82rem;
+}
+
+.folder-tools input {
+  min-width: 0;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #e5eef7;
+  background: #0d141f;
 }
 
 .scan-summary,
@@ -646,6 +673,7 @@ h2 {
 }
 
 .gallery-tile {
+  position: relative;
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -659,6 +687,26 @@ h2 {
 
 .media-card {
   cursor: default;
+}
+
+.media-card.selected {
+  border-color: #38bdf8;
+  background: #162942;
+}
+
+.select-overlay {
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  left: 10px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #e0f2fe;
+  background: rgba(13, 20, 31, 0.88);
 }
 
 .gallery-tile img {

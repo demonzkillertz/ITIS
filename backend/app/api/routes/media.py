@@ -7,7 +7,7 @@ from uuid import uuid4
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -56,6 +56,28 @@ def list_media_items(dataset_id: UUID, db: Session = Depends(get_db)) -> list[Me
         .order_by(models.MediaItem.created_at.asc())
     ).all()
     return [media_to_read(item) for item in items]
+
+
+@router.delete("/item/{media_id}", response_model=ProcessingJobRead)
+def delete_media_item(media_id: UUID, db: Session = Depends(get_db)) -> ProcessingJobRead:
+    media_item = db.get(models.MediaItem, media_id)
+    if media_item is None:
+        raise HTTPException(status_code=404, detail="Media item not found")
+
+    child_items = db.scalars(
+        select(models.MediaItem).where(models.MediaItem.parent_media_id == media_item.id)
+    ).all()
+    media_ids = [item.id for item in child_items] + [media_item.id]
+    db.execute(delete(models.Annotation).where(models.Annotation.media_id.in_(media_ids)))
+    db.execute(delete(models.MediaItem).where(models.MediaItem.id.in_(media_ids)))
+    db.commit()
+
+    removed_count = len(media_ids)
+    return ProcessingJobRead(
+        kind="media_delete",
+        status="completed",
+        message=f"Deleted {removed_count} media item{'' if removed_count == 1 else 's'}",
+    )
 
 
 @router.get("/{dataset_id}/import-history", response_model=list[ImportSessionRead])
@@ -837,6 +859,13 @@ def extract_video_frames(
     frame_number = 0
     saved_index = 0
     previous_detections: list[dict[str, float]] | None = None
+    existing_timestamps = {
+        int((timestamp or 0) * 1000)
+        for timestamp in db.scalars(
+            select(models.MediaItem.timestamp_seconds).where(models.MediaItem.parent_media_id == video_item.id)
+        ).all()
+        if timestamp is not None
+    }
     safe_video_name = safe_path_name(video_path.stem or Path(video_item.file_name).stem)
     frame_folder_name = f"{safe_video_name}_{str(video_item.id)[:8]}"
     video_frame_root = frame_root / frame_folder_name
@@ -853,6 +882,9 @@ def extract_video_frames(
                 continue
             timestamp = frame_number / fps if fps else 0
             timestamp_ms = int(timestamp * 1000)
+            if timestamp_ms in existing_timestamps:
+                frame_number += 1
+                continue
             frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
             frame_path = video_frame_root / frame_name
             cv2.imwrite(str(frame_path), frame)
@@ -875,6 +907,7 @@ def extract_video_frames(
             frames.append(frame_item)
             report.imported_frames += 1
             saved_index += 1
+            existing_timestamps.add(timestamp_ms)
             previous_detections = detections
         frame_number += 1
 
