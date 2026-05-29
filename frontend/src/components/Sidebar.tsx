@@ -1,4 +1,4 @@
-import { CircleDot, ListChecks } from "lucide-react";
+import { CircleDot, ListChecks, Trash2 } from "lucide-react";
 
 import type { Annotation, AnnotationClass } from "../types";
 
@@ -9,6 +9,7 @@ type SidebarProps = {
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string) => void;
+  onDeleteAnnotation: (id: string) => void;
 };
 
 export default function Sidebar({
@@ -17,7 +18,8 @@ export default function Sidebar({
   onSelectClass,
   annotations,
   selectedAnnotationId,
-  onSelectAnnotation
+  onSelectAnnotation,
+  onDeleteAnnotation
 }: SidebarProps) {
   return (
     <aside className="left-panel">
@@ -48,18 +50,26 @@ export default function Sidebar({
       </div>
       <div className="annotation-list">
         {annotations.map((annotation) => (
-          <button
+          <div
             key={annotation.id}
             className={
               annotation.id === selectedAnnotationId ? "annotation-row active" : "annotation-row"
             }
-            onClick={() => onSelectAnnotation(annotation.id)}
           >
-            <span>{annotation.className}</span>
-            <small>
-              {annotation.isPrefetched ? "prefetch" : annotation.source} / {annotation.status}
-            </small>
-          </button>
+            <button className="annotation-select" onClick={() => onSelectAnnotation(annotation.id)}>
+              <span>{annotation.className}</span>
+              <small>
+                {annotation.isPrefetched ? "prefetch" : annotation.source} / {annotation.status}
+              </small>
+            </button>
+            <button
+              className="annotation-delete"
+              title={`Delete ${annotation.className}`}
+              onClick={() => onDeleteAnnotation(annotation.id)}
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
         ))}
         {annotations.length === 0 ? <p className="empty-state">No labels</p> : null}
       </div>

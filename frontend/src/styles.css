@@ -523,6 +523,50 @@ h2 {
   text-align: left;
 }
 
+.annotation-row {
+  padding: 0;
+}
+
+.annotation-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  flex: 1;
+  padding: 0 0 0 10px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.annotation-select span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-delete {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 36px;
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid #2f3f54;
+  border-radius: 0 6px 6px 0;
+  color: #fca5a5;
+  background: transparent;
+}
+
+.annotation-delete:hover {
+  color: #fee2e2;
+  background: #7f1d1d;
+}
+
 .class-button {
   justify-content: flex-start;
 }
@@ -634,6 +678,29 @@ h2 {
 
 .gallery-tile small {
   color: #9fb2c8;
+}
+
+.frame-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid #314158;
+  border-radius: 999px;
+}
+
+.frame-status.ready {
+  border-color: #047857;
+  color: #a7f3d0;
+  background: #064e3b;
+}
+
+.frame-status.empty {
+  border-color: #7f1d1d;
+  color: #fecaca;
+  background: #451a1a;
 }
 
 .video-thumb {

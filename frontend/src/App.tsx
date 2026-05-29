@@ -28,9 +28,6 @@ import {
   listMedia,
   listModels,
   saveAnnotations,
-  scanImageFolder,
-  scanServerFolder,
-  scanVideoFolder,
   uploadImages
 } from "./api";
 import AnnotationCanvas from "./components/AnnotationCanvas";
@@ -39,7 +36,13 @@ import { classes } from "./data/sample";
 import type { ImportHistoryItem, ModelOption } from "./api";
 import type { Annotation, AnnotationClass, MediaSample } from "./types";
 
-type ScanResult = Awaited<ReturnType<typeof scanServerFolder>>;
+type ScanResult = {
+  image_count: number;
+  video_count: number;
+  frame_count: number;
+  label_count: number;
+  issue_count: number;
+};
 type OpenFolder = { kind: "import" | "video"; id: string } | null;
 
 export default function App() {
@@ -225,64 +228,7 @@ export default function App() {
     if (!datasetId || !importPayloadIsValid()) {
       return;
     }
-    await runWithProgress("Scanning server folders", async () => {
-      const result =
-        activeTab === "images" && !importVideos
-          ? await scanImageFolder(
-              datasetId,
-              parentDir,
-              imageDir,
-              labelDir,
-              importTask,
-              importMode,
-              duplicatePolicy,
-              autoAnnotate,
-              vehicleModelKey,
-              plateModelKey
-            )
-          : activeTab === "videos" && !importImages
-            ? await scanVideoFolder(
-                datasetId,
-                parentDir,
-                videoDir,
-                importTask,
-                importMode,
-                duplicatePolicy,
-                extractVideoFrames,
-                sampleEverySeconds,
-                autoAnnotate,
-                vehicleModelKey,
-                plateModelKey
-              )
-            : await scanServerFolder(
-                datasetId,
-                parentDir,
-                imageDir,
-                videoDir,
-                labelDir,
-                importTask,
-                importMode,
-                duplicatePolicy,
-                importImages,
-                importVideos,
-                extractVideoFrames,
-                sampleEverySeconds,
-                autoAnnotate,
-                vehicleModelKey,
-                plateModelKey
-              );
-      setScanResult(result);
-      setStatus(
-        `Found ${result.image_count} images, ${result.video_count} videos, ${result.matched_label_count} matching labels`
-      );
-    }).catch((error) => setStatus(error instanceof Error ? error.message : "Scan failed"));
-  }
-
-  async function handleServerImport() {
-    if (!datasetId || !importPayloadIsValid()) {
-      return;
-    }
-    await runWithProgress("Importing from server folders", async () => {
+    await runWithProgress("Scanning and saving server folders", async () => {
       const result =
         activeTab === "images" && !importVideos
           ? await importImageFolder(
@@ -330,13 +276,19 @@ export default function App() {
               );
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
-      setScanResult(null);
       setOpenFolder(null);
       setActiveTab("media");
+      setScanResult({
+        image_count: result.importedImages,
+        video_count: result.importedVideos,
+        frame_count: result.importedFrames,
+        label_count: result.importedAnnotations,
+        issue_count: result.issueCount
+      });
       setStatus(
-        `Imported ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames`
+        `Saved ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames`
       );
-    }).catch((error) => setStatus(error instanceof Error ? error.message : "Import failed"));
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Scan failed"));
   }
 
   function openImageImport() {
@@ -464,8 +416,14 @@ export default function App() {
     if (!selectedAnnotationId) {
       return;
     }
-    replaceAnnotations(annotations.filter((annotation) => annotation.id !== selectedAnnotationId));
-    setSelectedAnnotationId(null);
+    deleteAnnotation(selectedAnnotationId);
+  }
+
+  function deleteAnnotation(annotationId: string) {
+    replaceAnnotations(annotations.filter((annotation) => annotation.id !== annotationId));
+    if (selectedAnnotationId === annotationId) {
+      setSelectedAnnotationId(null);
+    }
   }
 
   function acceptSelected() {
@@ -618,6 +576,7 @@ export default function App() {
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={setSelectedAnnotationId}
+            onDeleteAnnotation={deleteAnnotation}
           />
           <section className="annotation-stage">
             <div className="media-meta">
@@ -773,8 +732,8 @@ export default function App() {
             <div className="dashboard-hero">
               <button onClick={openImageImport}>
                 <ImagePlus size={22} />
-                <strong>Import Existing Images</strong>
-                <span>Scan server image folders and optional YOLO labels.</span>
+                <strong>Scan Existing Images</strong>
+                <span>Save server image folders and optional YOLO labels.</span>
               </button>
               <button onClick={openVideoImport}>
                 <Film size={22} />
@@ -826,12 +785,12 @@ export default function App() {
           <section className="import-surface">
             <div className="section-title">
               {activeTab === "images" ? <ImagePlus size={20} /> : <Film size={20} />}
-              <h2>{activeTab === "images" ? "Existing Image Import" : "Video Scan and Frame Extraction"}</h2>
+              <h2>{activeTab === "images" ? "Existing Image Scan" : "Video Scan and Frame Extraction"}</h2>
             </div>
             <div className="workflow-note">
               {activeTab === "images"
-                ? "Use this for completed, partial, or unlabeled image datasets. Labels are matched by image filename stem."
-                : "Use this for traffic videos. The backend keeps the source path, extracts vehicle-detected frames, and can create AI draft boxes."}
+                ? "Use this for completed, partial, or unlabeled image datasets. Scan saves database records and matches labels by image filename stem."
+                : "Use this for traffic videos. Scan saves the video folder, extracts vehicle-detected frames, and can create AI draft boxes."}
             </div>
             <div className="import-grid">
               <label>
@@ -962,34 +921,30 @@ export default function App() {
                 <FolderSearch size={17} />
                 Scan
               </button>
-              <button onClick={handleServerImport}>
-                <Wand2 size={17} />
-                Import
-              </button>
               <span>{status}</span>
             </div>
 
             {scanResult ? (
               <div className="scan-summary">
                 <div>
-                  <span>Images</span>
+                  <span>Saved images</span>
                   <strong>{scanResult.image_count}</strong>
                 </div>
                 <div>
-                  <span>Videos</span>
+                  <span>Saved videos</span>
                   <strong>{scanResult.video_count}</strong>
+                </div>
+                <div>
+                  <span>Frames</span>
+                  <strong>{scanResult.frame_count}</strong>
                 </div>
                 <div>
                   <span>Labels</span>
                   <strong>{scanResult.label_count}</strong>
                 </div>
                 <div>
-                  <span>Matched</span>
-                  <strong>{scanResult.matched_label_count}</strong>
-                </div>
-                <div>
-                  <span>Missing</span>
-                  <strong>{scanResult.missing_label_count}</strong>
+                  <span>Issues</span>
+                  <strong>{scanResult.issue_count}</strong>
                 </div>
               </div>
             ) : null}
@@ -1054,7 +1009,7 @@ export default function App() {
                     <Film size={30} />
                   </div>
                   <span>{item.fileName}</span>
-                  <small>{annotatableMedia.filter((frame) => frame.parentMediaId === item.id).length} frames</small>
+                  <FrameStatus count={frameCountForVideo(annotatableMedia, item.id)} />
                   <div className="card-actions">
                     <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
                     <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Extract frames</button>
@@ -1116,6 +1071,18 @@ function ProgressStrip({ label }: { label: string }) {
       <span>{label}</span>
     </div>
   );
+}
+
+function FrameStatus({ count }: { count: number }) {
+  return (
+    <small className={count > 0 ? "frame-status ready" : "frame-status empty"}>
+      {count > 0 ? `Frames extracted: ${count}` : "Frames not extracted"}
+    </small>
+  );
+}
+
+function frameCountForVideo(media: MediaSample[], videoId: string) {
+  return media.filter((item) => item.parentMediaId === videoId).length;
 }
 
 function folderLabel(item: ImportHistoryItem) {
