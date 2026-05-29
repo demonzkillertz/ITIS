@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -33,6 +34,17 @@ from app.services.yolo_labels import YoloLabelError, parse_label_file
 router = APIRouter()
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
+
+
+@router.get("/item/{media_id}/content")
+def read_media_content(media_id: UUID, db: Session = Depends(get_db)) -> FileResponse:
+    media_item = db.get(models.MediaItem, media_id)
+    if media_item is None:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    media_path = path_for_media(media_item)
+    if not media_path.exists() or not media_path.is_file():
+        raise HTTPException(status_code=404, detail="Media file is not available on this server")
+    return FileResponse(media_path)
 
 
 @router.get("/{dataset_id}/items", response_model=list[MediaRead])
@@ -152,7 +164,6 @@ def import_server_folder(
                 db,
                 dataset_id,
                 image_path,
-                import_root,
                 payload,
                 report,
                 existing_names,
@@ -164,8 +175,9 @@ def import_server_folder(
             if label_dir is not None:
                 import_labels_for_media(db, media_item, label_dir / f"{image_path.stem}.txt", payload, report)
             if payload.auto_annotate:
-                model_key = payload.vehicle_model_key if payload.task == AnnotationTask.VEHICLE else payload.plate_model_key
-                auto_annotate_image(db, media_item, payload, report, model_key)
+                for task in tasks_for_payload(payload):
+                    model_key = payload.vehicle_model_key if task == AnnotationTask.VEHICLE else payload.plate_model_key
+                    auto_annotate_image(db, media_item, payload.model_copy(update={"task": task}), report, model_key)
 
     if payload.import_videos and video_dir is not None:
         for video_path in sorted(video_dir.rglob("*")):
@@ -175,7 +187,6 @@ def import_server_folder(
                 db,
                 dataset_id,
                 video_path,
-                import_root,
                 payload,
                 report,
                 existing_names,
@@ -198,8 +209,9 @@ def import_server_folder(
                 saved_items.extend(frames)
                 if payload.auto_annotate:
                     for frame_item in frames:
-                        model_key = payload.vehicle_model_key if payload.task == AnnotationTask.VEHICLE else payload.plate_model_key
-                        auto_annotate_image(db, frame_item, payload, report, model_key)
+                        for task in tasks_for_payload(payload):
+                            model_key = payload.vehicle_model_key if task == AnnotationTask.VEHICLE else payload.plate_model_key
+                            auto_annotate_image(db, frame_item, payload.model_copy(update={"task": task}), report, model_key)
 
     import_session.imported_images = report.imported_images
     import_session.imported_videos = report.imported_videos
@@ -375,7 +387,7 @@ def extract_frames_for_video(
     if video_item.media_type != MediaType.VIDEO.value:
         raise HTTPException(status_code=400, detail="Selected media is not a video")
 
-    video_path = settings.storage_root / video_item.storage_key
+    video_path = path_for_media(video_item)
     frame_root = settings.storage_root / "frames" / str(video_item.dataset_id)
     frame_root.mkdir(parents=True, exist_ok=True)
     tasks = payload.tasks or [payload.task]
@@ -402,7 +414,10 @@ def extract_frames_for_video(
         frame_root,
         ServerFolderImportCreate(
             task=primary_task,
+            tasks=tasks,
             video_sample_every_seconds=payload.sample_every_seconds,
+            vehicle_model_key=payload.vehicle_model_key,
+            plate_model_key=payload.plate_model_key,
         ),
         report,
         import_session.id,
@@ -480,8 +495,8 @@ def auto_annotate_image(
         from ultralytics import YOLO
 
         model = YOLO(str(model_path))
-        image_path = settings.storage_root / media_item.storage_key
-        results = model.predict(str(image_path), verbose=False)
+        image_path = path_for_media(media_item)
+        results = model.predict(str(image_path), verbose=False, device=inference_device())
     except Exception as exc:
         report.issues.append(
             ImportIssue(
@@ -600,15 +615,42 @@ def map_model_class(
 
     if is_base_model_key(model_key):
         coco_to_vehicle = {
-            1: 0,
-            3: 0,
-            2: 1,
-            5: 2,
-            7: 3,
+            1: 1,
+            3: 1,
+            2: 2,
+            5: 3,
+            7: 4,
         }
         return coco_to_vehicle.get(raw_class_id)
 
-    return raw_class_id if raw_class_id in {0, 1, 2, 3} else None
+    return raw_class_id if raw_class_id in {1, 2, 3, 4} else None
+
+
+def tasks_for_payload(payload: ServerFolderImportCreate) -> list[AnnotationTask]:
+    if payload.tasks:
+        ordered: list[AnnotationTask] = []
+        for task in payload.tasks:
+            if task not in ordered:
+                ordered.append(task)
+        return ordered
+    return [payload.task]
+
+
+def inference_device() -> str | None:
+    try:
+        import torch
+
+        return "cuda:0" if torch.cuda.is_available() else None
+    except Exception:
+        return None
+
+
+def path_for_media(item: models.MediaItem) -> Path:
+    if item.source_path:
+        source_path = Path(item.source_path)
+        if source_path.exists():
+            return source_path
+    return settings.storage_root / item.storage_key
 
 
 def ensure_dataset(db: Session, dataset_id: UUID) -> models.Dataset:
@@ -655,7 +697,6 @@ def import_image_file(
     db: Session,
     dataset_id: UUID,
     image_path: Path,
-    import_root: Path,
     payload: ServerFolderImportCreate,
     report: ServerFolderImportRead,
     existing_names: set[str],
@@ -672,11 +713,8 @@ def import_image_file(
         )
         return None
 
-    storage_name = f"{uuid4()}{image_path.suffix.lower()}"
-    storage_path = import_root / storage_name
     try:
-        shutil.copy2(image_path, storage_path)
-        width, height = read_image_size(storage_path)
+        width, height = read_image_size(image_path)
     except HTTPException as exc:
         report.skipped_images += 1
         report.issues.append(
@@ -687,7 +725,7 @@ def import_image_file(
     media_item = models.MediaItem(
         dataset_id=dataset_id,
         file_name=image_path.name,
-        storage_key=f"uploads/{dataset_id}/{storage_name}",
+        storage_key=str(image_path),
         media_type=MediaType.IMAGE.value,
         source_path=str(image_path),
         import_session_id=import_session_id,
@@ -705,7 +743,6 @@ def import_video_file(
     db: Session,
     dataset_id: UUID,
     video_path: Path,
-    import_root: Path,
     payload: ServerFolderImportCreate,
     report: ServerFolderImportRead,
     existing_names: set[str],
@@ -722,14 +759,11 @@ def import_video_file(
         )
         return None
 
-    storage_name = f"{uuid4()}{video_path.suffix.lower()}"
-    storage_path = import_root / storage_name
-    shutil.copy2(video_path, storage_path)
-    width, height, _fps, _frame_count = read_video_metadata(storage_path)
+    width, height, _fps, _frame_count = read_video_metadata(video_path)
     media_item = models.MediaItem(
         dataset_id=dataset_id,
         file_name=video_path.name,
-        storage_key=f"uploads/{dataset_id}/{storage_name}",
+        storage_key=str(video_path),
         media_type=MediaType.VIDEO.value,
         source_path=str(video_path),
         import_session_id=import_session_id,
@@ -779,6 +813,7 @@ def extract_video_frames(
 
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 25)
     step = max(1, int(fps * payload.video_sample_every_seconds))
+    detector = load_vehicle_frame_detector(payload, report)
     frames: list[models.MediaItem] = []
     frame_number = 0
     saved_index = 0
@@ -791,7 +826,7 @@ def extract_video_frames(
         ok, frame = capture.read()
         if not ok:
             break
-        if frame_number % step == 0:
+        if frame_number % step == 0 and should_save_video_frame(detector, frame):
             timestamp = frame_number / fps if fps else 0
             timestamp_ms = int(timestamp * 1000)
             frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
@@ -820,6 +855,42 @@ def extract_video_frames(
 
     capture.release()
     return frames
+
+
+def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: ServerFolderImportRead):
+    model_path = model_path_for_key(payload.vehicle_model_key, AnnotationTask.VEHICLE)
+    if not model_path.exists():
+        report.issues.append(
+            ImportIssue(
+                path=str(model_path),
+                issue_type="missing_vehicle_model",
+                message="Smart video frame capture needs a vehicle model; falling back to sampled frames.",
+            )
+        )
+        return None
+    try:
+        from ultralytics import YOLO
+
+        return YOLO(str(model_path))
+    except Exception as exc:
+        report.issues.append(
+            ImportIssue(
+                path=str(model_path),
+                issue_type="vehicle_model_load_failed",
+                message=f"Smart video frame capture fell back to sampled frames: {exc}",
+            )
+        )
+        return None
+
+
+def should_save_video_frame(detector, frame) -> bool:
+    if detector is None:
+        return True
+    try:
+        results = detector.predict(frame, verbose=False, device=inference_device())
+    except Exception:
+        return False
+    return any(len(result.boxes) > 0 for result in results)
 
 
 def import_labels_for_media(
@@ -885,7 +956,7 @@ def media_to_read(item: models.MediaItem) -> MediaRead:
         id=item.id,
         dataset_id=item.dataset_id,
         file_name=item.file_name,
-        image_url=f"/storage/{item.storage_key}",
+        image_url=f"/api/media/item/{item.id}/content",
         media_type=item.media_type or MediaType.IMAGE,
         width=item.width or 1,
         height=item.height or 1,

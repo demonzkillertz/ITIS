@@ -7,10 +7,10 @@ class AnnotationTask(StrEnum):
 
 
 VEHICLE_CLASSES: dict[int, str] = {
-    0: "bike",
-    1: "car",
-    2: "bus_microbus",
-    3: "large_vehicle",
+    1: "bike",
+    2: "car",
+    3: "bus_microbus",
+    4: "large_vehicle",
 }
 
 PLATE_CLASSES: dict[int, str] = {

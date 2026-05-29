@@ -48,7 +48,7 @@ export default function App() {
   const [screen, setScreen] = useState<"home" | "annotate">("home");
   const [activeTab, setActiveTab] = useState<"dashboard" | "images" | "videos" | "media" | "history">("dashboard");
   const [mediaIndex, setMediaIndex] = useState(0);
-  const [selectedClass, setSelectedClass] = useState<AnnotationClass>(classes[1]);
+  const [selectedClass, setSelectedClass] = useState<AnnotationClass>(classes[2]);
   const [annotationsByMedia, setAnnotationsByMedia] = useState<Record<string, Annotation[]>>({});
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
   const [status, setStatus] = useState("Ready");
@@ -79,6 +79,14 @@ export default function App() {
     [mediaItems]
   );
   const videos = useMemo(() => mediaItems.filter((item) => item.mediaType === "video"), [mediaItems]);
+  const [openVideoFolderId, setOpenVideoFolderId] = useState<string | null>(null);
+  const visibleFrames = useMemo(
+    () =>
+      openVideoFolderId
+        ? annotatableMedia.filter((item) => item.parentMediaId === openVideoFolderId)
+        : annotatableMedia,
+    [annotatableMedia, openVideoFolderId]
+  );
   const videoCount = videos.length;
   const media = annotatableMedia[mediaIndex] ?? null;
   const mediaId = media?.id ?? null;
@@ -180,7 +188,7 @@ export default function App() {
     }
     await runWithProgress("Scanning server folders", async () => {
       const result =
-        activeTab === "images"
+        activeTab === "images" && !importVideos
           ? await scanImageFolder(
               datasetId,
               parentDir,
@@ -193,7 +201,7 @@ export default function App() {
               vehicleModelKey,
               plateModelKey
             )
-          : activeTab === "videos"
+          : activeTab === "videos" && !importImages
             ? await scanVideoFolder(
                 datasetId,
                 parentDir,
@@ -237,7 +245,7 @@ export default function App() {
     }
     await runWithProgress("Importing from server folders", async () => {
       const result =
-        activeTab === "images"
+        activeTab === "images" && !importVideos
           ? await importImageFolder(
               datasetId,
               parentDir,
@@ -250,7 +258,7 @@ export default function App() {
               vehicleModelKey,
               plateModelKey
             )
-          : activeTab === "videos"
+          : activeTab === "videos" && !importImages
             ? await importVideoFolder(
                 datasetId,
                 parentDir,
@@ -361,6 +369,20 @@ export default function App() {
       setAnnotationsByMedia((current) => ({ ...current, [item.id]: updated }));
       setStatus(result.message ?? "AI suggestions created");
     }).catch((error) => setStatus(error instanceof Error ? error.message : "AI suggestion failed"));
+  }
+
+  async function handleBulkAiBoth() {
+    if (annotatableMedia.length === 0) {
+      return;
+    }
+    await runWithProgress("Creating vehicle and plate suggestions for all images", async () => {
+      for (const item of annotatableMedia) {
+        await autoAnnotateMedia(item.id, "vehicle", vehicleModelKey);
+        await autoAnnotateMedia(item.id, "plate", plateModelKey);
+      }
+      setAnnotationsByMedia({});
+      setStatus(`AI suggestions created for ${annotatableMedia.length} image${annotatableMedia.length === 1 ? "" : "s"}`);
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Bulk AI suggestion failed"));
   }
 
   function goTo(delta: number) {
@@ -768,7 +790,7 @@ export default function App() {
             <div className="workflow-note">
               {activeTab === "images"
                 ? "Use this for completed, partial, or unlabeled image datasets. Labels are matched by image filename stem."
-                : "Use this for traffic videos. The backend copies videos, extracts sampled frames, and can create AI draft boxes."}
+                : "Use this for traffic videos. The backend keeps the source path, extracts vehicle-detected frames, and can create AI draft boxes."}
             </div>
             <div className="import-grid">
               <label>
@@ -789,7 +811,7 @@ export default function App() {
                   placeholder="C:\\datasets\\traffic"
                 />
               </label>
-              {activeTab === "images" ? (
+              {importImages ? (
                 <>
                   <label>
                     <span>Images</span>
@@ -808,7 +830,8 @@ export default function App() {
                     />
                   </label>
                 </>
-              ) : (
+              ) : null}
+              {importVideos ? (
                 <>
                   <label>
                     <span>Videos</span>
@@ -829,7 +852,7 @@ export default function App() {
                     />
                   </label>
                 </>
-              )}
+              ) : null}
               <label>
                 <span>Label task</span>
                 <select
@@ -857,7 +880,23 @@ export default function App() {
             </div>
 
             <div className="option-strip">
-              {activeTab === "videos" ? (
+              <label>
+                <input
+                  type="checkbox"
+                  checked={importImages}
+                  onChange={(event) => setImportImages(event.target.checked)}
+                />
+                Images
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={importVideos}
+                  onChange={(event) => setImportVideos(event.target.checked)}
+                />
+                Videos
+              </label>
+              {importVideos ? (
                 <label>
                   <input
                     type="checkbox"
@@ -936,6 +975,18 @@ export default function App() {
                 <strong>{importHistory.length}</strong>
               </div>
             </div>
+            <div className="action-row">
+              {openVideoFolderId ? (
+                <button onClick={() => setOpenVideoFolderId(null)}>
+                  <GalleryHorizontalEnd size={17} />
+                  All media
+                </button>
+              ) : null}
+              <button onClick={handleBulkAiBoth} disabled={isProcessing || annotatableMedia.length === 0}>
+                <Wand2 size={17} />
+                AI both all
+              </button>
+            </div>
             <div className="gallery-grid home-gallery">
               {videos.map((item) => (
                 <div className="gallery-tile media-card" key={item.id}>
@@ -943,20 +994,21 @@ export default function App() {
                     <Film size={30} />
                   </div>
                   <span>{item.fileName}</span>
-                  <small>Video source</small>
+                  <small>{annotatableMedia.filter((frame) => frame.parentMediaId === item.id).length} frames</small>
                   <div className="card-actions">
+                    <button onClick={() => setOpenVideoFolderId(item.id)}>Open folder</button>
                     <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Extract frames</button>
                     <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Extract + AI</button>
                   </div>
                 </div>
               ))}
-              {annotatableMedia.map((item, index) => (
+              {visibleFrames.map((item) => (
                 <div className="gallery-tile media-card" key={item.id}>
                   <img src={item.imageUrl} alt={item.fileName} />
                   <span>{item.fileName}</span>
                   {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
                   <div className="card-actions">
-                    <button onClick={() => openMedia(index)}>Annotate</button>
+                    <button onClick={() => openMedia(annotatableMedia.findIndex((mediaItem) => mediaItem.id === item.id))}>Annotate</button>
                     <button onClick={() => handleAiBoth(item)} disabled={isProcessing}>AI both</button>
                     <button onClick={() => handleAiSuggestion(item, "vehicle")} disabled={isProcessing}>Vehicle</button>
                     <button onClick={() => handleAiSuggestion(item, "plate")} disabled={isProcessing}>Plate</button>

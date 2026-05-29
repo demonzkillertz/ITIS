@@ -21,6 +21,7 @@ type ApiMedia = {
   height: number;
   frame_index?: number | null;
   timestamp_seconds?: number | null;
+  source_path?: string | null;
   parent_media_id?: string | null;
 };
 
@@ -171,6 +172,7 @@ export async function listMedia(datasetId: string): Promise<MediaSample[]> {
     height: item.height,
     frameIndex: item.frame_index ?? undefined,
     timestampSeconds: item.timestamp_seconds ?? undefined,
+    sourcePath: item.source_path ?? undefined,
     parentMediaId: item.parent_media_id ?? undefined
   }));
 }
@@ -321,7 +323,10 @@ async function importFolderAt(path: string, payload: FolderPayload) {
       import_videos: payload.importVideos,
       extract_video_frames: payload.extractVideoFrames,
       video_sample_every_seconds: payload.sampleEverySeconds,
-      auto_annotate: payload.autoAnnotate
+      auto_annotate: payload.autoAnnotate,
+      tasks: payload.autoAnnotate ? ["vehicle", "plate"] : [payload.task],
+      vehicle_model_key: payload.vehicleModelKey,
+      plate_model_key: payload.plateModelKey
     })
   });
 
@@ -342,6 +347,7 @@ async function importFolderAt(path: string, payload: FolderPayload) {
       height: item.height,
       frameIndex: item.frame_index ?? undefined,
       timestampSeconds: item.timestamp_seconds ?? undefined,
+      sourcePath: item.source_path ?? undefined,
       parentMediaId: item.parent_media_id ?? undefined
     }))
   };
@@ -460,6 +466,7 @@ function scanFolderAt(path: string, payload: FolderPayload) {
       extract_video_frames: payload.extractVideoFrames,
       video_sample_every_seconds: payload.sampleEverySeconds,
       auto_annotate: payload.autoAnnotate,
+      tasks: payload.autoAnnotate ? ["vehicle", "plate"] : [payload.task],
       vehicle_model_key: payload.vehicleModelKey,
       plate_model_key: payload.plateModelKey
     })

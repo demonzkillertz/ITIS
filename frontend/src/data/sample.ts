@@ -1,11 +1,11 @@
 import type { Annotation, AnnotationClass, MediaSample } from "../types";
 
 export const classes: AnnotationClass[] = [
-  { id: 0, name: "bike", task: "vehicle", color: "#1f8a70" },
-  { id: 1, name: "car", task: "vehicle", color: "#d95836" },
-  { id: 2, name: "bus_microbus", task: "vehicle", color: "#6f5bd7" },
-  { id: 3, name: "large_vehicle", task: "vehicle", color: "#b7791f" },
-  { id: 0, name: "number_plate", task: "plate", color: "#0f766e" }
+  { id: 0, name: "number_plate", task: "plate", color: "#0f766e" },
+  { id: 1, name: "bike", task: "vehicle", color: "#1f8a70" },
+  { id: 2, name: "car", task: "vehicle", color: "#d95836" },
+  { id: 3, name: "bus_microbus", task: "vehicle", color: "#6f5bd7" },
+  { id: 4, name: "large_vehicle", task: "vehicle", color: "#b7791f" }
 ];
 
 export const sampleMedia: MediaSample[] = [
@@ -38,7 +38,7 @@ export const sampleAnnotations: Record<string, Annotation[]> = {
     {
       id: "ann-001",
       task: "vehicle",
-      classId: 1,
+      classId: 2,
       className: "car",
       box: { xCenter: 0.5, yCenter: 0.62, width: 0.32, height: 0.28 },
       confidence: 0.91,

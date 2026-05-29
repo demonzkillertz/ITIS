@@ -40,4 +40,5 @@ export type MediaSample = {
   frameIndex?: number;
   timestampSeconds?: number;
   parentMediaId?: string;
+  sourcePath?: string;
 };

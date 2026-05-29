@@ -119,6 +119,7 @@ class ServerFolderImportCreate(BaseModel):
     mode: FolderImportMode = FolderImportMode.AUTO
     source_type: ImportSourceType = ImportSourceType.MIXED_FOLDER
     task: AnnotationTask = AnnotationTask.VEHICLE
+    tasks: list[AnnotationTask] | None = None
     duplicate_policy: DuplicatePolicy = DuplicatePolicy.SKIP
     import_images: bool = True
     import_videos: bool = False
