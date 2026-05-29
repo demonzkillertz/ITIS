@@ -22,6 +22,7 @@ type ApiMedia = {
   frame_index?: number | null;
   timestamp_seconds?: number | null;
   source_path?: string | null;
+  import_session_id?: string | null;
   parent_media_id?: string | null;
 };
 
@@ -90,6 +91,7 @@ type ApiImportHistoryItem = {
   image_dir: string;
   video_dir?: string | null;
   label_dir?: string | null;
+  source_type: "image_folder" | "video_folder" | "mixed_folder";
   task: AnnotationTask;
   duplicate_policy: "skip" | "import_copy";
   imported_images: number;
@@ -136,6 +138,7 @@ export type ImportHistoryItem = {
   videoDir?: string | null;
   labelDir?: string | null;
   parentDir?: string | null;
+  sourceType: "image_folder" | "video_folder" | "mixed_folder";
   task: AnnotationTask;
   importedImages: number;
   importedVideos: number;
@@ -173,6 +176,7 @@ export async function listMedia(datasetId: string): Promise<MediaSample[]> {
     frameIndex: item.frame_index ?? undefined,
     timestampSeconds: item.timestamp_seconds ?? undefined,
     sourcePath: item.source_path ?? undefined,
+    importSessionId: item.import_session_id ?? undefined,
     parentMediaId: item.parent_media_id ?? undefined
   }));
 }
@@ -348,6 +352,7 @@ async function importFolderAt(path: string, payload: FolderPayload) {
       frameIndex: item.frame_index ?? undefined,
       timestampSeconds: item.timestamp_seconds ?? undefined,
       sourcePath: item.source_path ?? undefined,
+      importSessionId: item.import_session_id ?? undefined,
       parentMediaId: item.parent_media_id ?? undefined
     }))
   };
@@ -478,6 +483,7 @@ export async function listImportHistory(datasetId: string): Promise<ImportHistor
   return history.map((item) => ({
     id: item.id,
     parentDir: item.parent_dir,
+    sourceType: item.source_type,
     imageDir: item.image_dir,
     videoDir: item.video_dir,
     labelDir: item.label_dir,

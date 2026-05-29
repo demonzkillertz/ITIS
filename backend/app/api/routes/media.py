@@ -646,11 +646,19 @@ def inference_device() -> str | None:
 
 
 def path_for_media(item: models.MediaItem) -> Path:
+    storage_key_path = Path(item.storage_key)
+    storage_path = storage_key_path if storage_key_path.is_absolute() else settings.storage_root / storage_key_path
+    if storage_path.exists():
+        return storage_path
+    if item.media_type == MediaType.IMAGE.value and item.parent_media_id is not None:
+        return storage_path
+
     if item.source_path:
         source_path = Path(item.source_path)
         if source_path.exists():
             return source_path
-    return settings.storage_root / item.storage_key
+
+    return storage_path
 
 
 def ensure_dataset(db: Session, dataset_id: UUID) -> models.Dataset:
@@ -963,6 +971,7 @@ def media_to_read(item: models.MediaItem) -> MediaRead:
         frame_index=item.frame_index,
         timestamp_seconds=item.timestamp_seconds,
         source_path=item.source_path,
+        import_session_id=item.import_session_id,
         parent_media_id=item.parent_media_id,
         created_at=item.created_at,
     )

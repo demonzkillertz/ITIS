@@ -40,6 +40,7 @@ import type { ImportHistoryItem, ModelOption } from "./api";
 import type { Annotation, AnnotationClass, MediaSample } from "./types";
 
 type ScanResult = Awaited<ReturnType<typeof scanServerFolder>>;
+type OpenFolder = { kind: "import" | "video"; id: string } | null;
 
 export default function App() {
   const [datasetId, setDatasetId] = useState<string | null>(null);
@@ -79,13 +80,51 @@ export default function App() {
     [mediaItems]
   );
   const videos = useMemo(() => mediaItems.filter((item) => item.mediaType === "video"), [mediaItems]);
-  const [openVideoFolderId, setOpenVideoFolderId] = useState<string | null>(null);
-  const visibleFrames = useMemo(
+  const [openFolder, setOpenFolder] = useState<OpenFolder>(null);
+  const importFolders = useMemo(
     () =>
-      openVideoFolderId
-        ? annotatableMedia.filter((item) => item.parentMediaId === openVideoFolderId)
-        : annotatableMedia,
-    [annotatableMedia, openVideoFolderId]
+      importHistory
+        .map((item) => {
+          const folderMedia = mediaItems.filter((mediaItem) => mediaItem.importSessionId === item.id);
+          return {
+            history: item,
+            media: folderMedia,
+            images: folderMedia.filter((mediaItem) => mediaItem.mediaType === "image").length,
+            videos: folderMedia.filter((mediaItem) => mediaItem.mediaType === "video").length
+          };
+        })
+        .filter(
+          (folder) =>
+            folder.media.length > 0 ||
+            folder.history.importedImages > 0 ||
+            folder.history.importedVideos > 0 ||
+            folder.history.importedFrames > 0
+        ),
+    [importHistory, mediaItems]
+  );
+  const visibleFrames = useMemo(
+    () => {
+      if (openFolder?.kind === "video") {
+        return annotatableMedia.filter((item) => item.parentMediaId === openFolder.id);
+      }
+      if (openFolder?.kind === "import") {
+        return annotatableMedia.filter((item) => item.importSessionId === openFolder.id);
+      }
+      return annotatableMedia.filter((item) => !item.importSessionId);
+    },
+    [annotatableMedia, openFolder]
+  );
+  const visibleVideos = useMemo(
+    () => {
+      if (openFolder?.kind === "import") {
+        return videos.filter((item) => item.importSessionId === openFolder.id);
+      }
+      if (openFolder?.kind === "video") {
+        return videos.filter((item) => item.id === openFolder.id);
+      }
+      return videos.filter((item) => !item.importSessionId);
+    },
+    [openFolder, videos]
   );
   const videoCount = videos.length;
   const media = annotatableMedia[mediaIndex] ?? null;
@@ -292,6 +331,7 @@ export default function App() {
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
       setScanResult(null);
+      setOpenFolder(null);
       setActiveTab("media");
       setStatus(
         `Imported ${result.importedImages} images, ${result.importedVideos} videos, ${result.importedFrames} frames`
@@ -320,6 +360,7 @@ export default function App() {
     await runWithProgress("Uploading images", async () => {
       await uploadImages(datasetId, files);
       await refreshDataset(datasetId);
+      setOpenFolder(null);
       setActiveTab("media");
       setStatus(`${files.length} image${files.length === 1 ? "" : "s"} uploaded`);
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Upload failed"));
@@ -976,8 +1017,8 @@ export default function App() {
               </div>
             </div>
             <div className="action-row">
-              {openVideoFolderId ? (
-                <button onClick={() => setOpenVideoFolderId(null)}>
+              {openFolder ? (
+                <button onClick={() => setOpenFolder(null)}>
                   <GalleryHorizontalEnd size={17} />
                   All media
                 </button>
@@ -988,7 +1029,26 @@ export default function App() {
               </button>
             </div>
             <div className="gallery-grid home-gallery">
-              {videos.map((item) => (
+              {!openFolder
+                ? importFolders.map((folder) => (
+                    <div className="gallery-tile media-card" key={folder.history.id}>
+                      <div className="video-thumb">
+                        <FolderSearch size={30} />
+                      </div>
+                      <span>{folderLabel(folder.history)}</span>
+                      <small>
+                        {folder.images || folder.history.importedImages + folder.history.importedFrames} images/frames,{" "}
+                        {folder.videos || folder.history.importedVideos} videos
+                      </small>
+                      <div className="card-actions">
+                        <button onClick={() => setOpenFolder({ kind: "import", id: folder.history.id })}>
+                          Open folder
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                : null}
+              {visibleVideos.map((item) => (
                 <div className="gallery-tile media-card" key={item.id}>
                   <div className="video-thumb">
                     <Film size={30} />
@@ -996,7 +1056,7 @@ export default function App() {
                   <span>{item.fileName}</span>
                   <small>{annotatableMedia.filter((frame) => frame.parentMediaId === item.id).length} frames</small>
                   <div className="card-actions">
-                    <button onClick={() => setOpenVideoFolderId(item.id)}>Open folder</button>
+                    <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
                     <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Extract frames</button>
                     <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Extract + AI</button>
                   </div>
@@ -1017,6 +1077,10 @@ export default function App() {
               ))}
               {annotatableMedia.length === 0 && videos.length === 0 ? (
                 <div className="empty-gallery">No imported media</div>
+              ) : null}
+              {!openFolder && importFolders.length > 0 && visibleFrames.length === 0 && visibleVideos.length === 0 ? null : null}
+              {openFolder && visibleFrames.length === 0 && visibleVideos.length === 0 ? (
+                <div className="empty-gallery">No media in this folder</div>
               ) : null}
             </div>
           </section>
@@ -1052,6 +1116,19 @@ function ProgressStrip({ label }: { label: string }) {
       <span>{label}</span>
     </div>
   );
+}
+
+function folderLabel(item: ImportHistoryItem) {
+  const path = item.parentDir || item.imageDir || item.videoDir || "Import";
+  const normalized = path.replace(/\\/g, "/");
+  const name = normalized.split("/").filter(Boolean).pop();
+  if (item.sourceType === "video_folder") {
+    return name ? `Video import: ${name}` : "Video import";
+  }
+  if (item.sourceType === "image_folder") {
+    return name ? `Image import: ${name}` : "Image import";
+  }
+  return name ? `Mixed import: ${name}` : "Mixed import";
 }
 
 function clamp(value: number, min: number, max: number) {

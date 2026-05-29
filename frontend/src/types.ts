@@ -39,6 +39,7 @@ export type MediaSample = {
   height: number;
   frameIndex?: number;
   timestampSeconds?: number;
+  importSessionId?: string;
   parentMediaId?: string;
   sourcePath?: string;
 };

@@ -107,6 +107,7 @@ class MediaRead(BaseModel):
     frame_index: int | None = None
     timestamp_seconds: float | None = None
     source_path: str | None = None
+    import_session_id: UUID | None = None
     parent_media_id: UUID | None = None
     created_at: datetime
 
