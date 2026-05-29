@@ -72,9 +72,6 @@ export default function App() {
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "import_copy">("skip");
   const [importImages, setImportImages] = useState(true);
   const [importVideos, setImportVideos] = useState(false);
-  const [extractVideoFrames, setExtractVideoFrames] = useState(true);
-  const [autoAnnotate, setAutoAnnotate] = useState(false);
-  const [sampleEverySeconds, setSampleEverySeconds] = useState(1);
   const [vehicleModelKey, setVehicleModelKey] = useState("custom_vehicle");
   const [plateModelKey, setPlateModelKey] = useState("custom_plate");
 
@@ -84,25 +81,35 @@ export default function App() {
   );
   const videos = useMemo(() => mediaItems.filter((item) => item.mediaType === "video"), [mediaItems]);
   const [openFolder, setOpenFolder] = useState<OpenFolder>(null);
-  const importFolders = useMemo(
-    () =>
+  const scanFolders = useMemo(
+    () => {
+      const groups = new Map<string, { history: ImportHistoryItem[]; media: MediaSample[] }>();
       importHistory
-        .map((item) => {
-          const folderMedia = mediaItems.filter((mediaItem) => mediaItem.importSessionId === item.id);
+        .filter((item) => item.importedImages > 0 || item.importedVideos > 0)
+        .forEach((item) => {
+          const key = folderKey(item);
+          const group = groups.get(key) ?? { history: [], media: [] };
+          group.history.push(item);
+          groups.set(key, group);
+        });
+      groups.forEach((group) => {
+        const sessionIds = new Set(group.history.map((item) => item.id));
+        group.media = mediaItems.filter((mediaItem) => mediaItem.importSessionId && sessionIds.has(mediaItem.importSessionId));
+      });
+      return Array.from(groups.entries())
+        .map(([key, group]) => {
+          const latest = group.history[0];
           return {
-            history: item,
-            media: folderMedia,
-            images: folderMedia.filter((mediaItem) => mediaItem.mediaType === "image").length,
-            videos: folderMedia.filter((mediaItem) => mediaItem.mediaType === "video").length
+            key,
+            latest,
+            histories: group.history,
+            media: group.media,
+            images: group.media.filter((mediaItem) => mediaItem.mediaType === "image").length,
+            videos: group.media.filter((mediaItem) => mediaItem.mediaType === "video").length
           };
         })
-        .filter(
-          (folder) =>
-            folder.media.length > 0 ||
-            folder.history.importedImages > 0 ||
-            folder.history.importedVideos > 0 ||
-            folder.history.importedFrames > 0
-        ),
+        .filter((folder) => folder.media.length > 0 || folder.images > 0 || folder.videos > 0);
+    },
     [importHistory, mediaItems]
   );
   const visibleFrames = useMemo(
@@ -111,23 +118,27 @@ export default function App() {
         return annotatableMedia.filter((item) => item.parentMediaId === openFolder.id);
       }
       if (openFolder?.kind === "import") {
-        return annotatableMedia.filter((item) => item.importSessionId === openFolder.id);
+        const folder = scanFolders.find((item) => item.key === openFolder.id);
+        const sessionIds = new Set(folder?.histories.map((item) => item.id) ?? []);
+        return annotatableMedia.filter((item) => item.importSessionId && sessionIds.has(item.importSessionId));
       }
       return annotatableMedia.filter((item) => !item.importSessionId);
     },
-    [annotatableMedia, openFolder]
+    [annotatableMedia, openFolder, scanFolders]
   );
   const visibleVideos = useMemo(
     () => {
       if (openFolder?.kind === "import") {
-        return videos.filter((item) => item.importSessionId === openFolder.id);
+        const folder = scanFolders.find((item) => item.key === openFolder.id);
+        const sessionIds = new Set(folder?.histories.map((item) => item.id) ?? []);
+        return videos.filter((item) => item.importSessionId && sessionIds.has(item.importSessionId));
       }
       if (openFolder?.kind === "video") {
         return videos.filter((item) => item.id === openFolder.id);
       }
       return videos.filter((item) => !item.importSessionId);
     },
-    [openFolder, videos]
+    [openFolder, scanFolders, videos]
   );
   const videoCount = videos.length;
   const media = annotatableMedia[mediaIndex] ?? null;
@@ -236,12 +247,12 @@ export default function App() {
               parentDir,
               imageDir,
               labelDir,
-              importTask,
-              importMode,
-              duplicatePolicy,
-              autoAnnotate,
-              vehicleModelKey,
-              plateModelKey
+                importTask,
+                importMode,
+                duplicatePolicy,
+                false,
+                vehicleModelKey,
+                plateModelKey
             )
           : activeTab === "videos" && !importImages
             ? await importVideoFolder(
@@ -251,9 +262,9 @@ export default function App() {
                 importTask,
                 importMode,
                 duplicatePolicy,
-                extractVideoFrames,
-                sampleEverySeconds,
-                autoAnnotate,
+                false,
+                1,
+                false,
                 vehicleModelKey,
                 plateModelKey
               )
@@ -268,9 +279,9 @@ export default function App() {
                 duplicatePolicy,
                 importImages,
                 importVideos,
-                extractVideoFrames,
-                sampleEverySeconds,
-                autoAnnotate,
+                false,
+                1,
+                false,
                 vehicleModelKey,
                 plateModelKey
               );
@@ -294,14 +305,12 @@ export default function App() {
   function openImageImport() {
     setImportImages(true);
     setImportVideos(false);
-    setExtractVideoFrames(false);
     setActiveTab("images");
   }
 
   function openVideoImport() {
     setImportImages(false);
     setImportVideos(true);
-    setExtractVideoFrames(true);
     setActiveTab("videos");
   }
 
@@ -324,11 +333,11 @@ export default function App() {
     setScreen("annotate");
   }
 
-  async function handleExtractFrames(video: MediaSample, withAi = autoAnnotate) {
+  async function handleExtractFrames(video: MediaSample, withAi = false) {
     await runWithProgress(`Extracting frames from ${video.fileName}`, async () => {
       const result = await extractFrames(
         video.id,
-        sampleEverySeconds,
+        1,
         withAi,
         withAi ? ["vehicle", "plate"] : [importTask],
         vehicleModelKey,
@@ -738,7 +747,7 @@ export default function App() {
               <button onClick={openVideoImport}>
                 <Film size={22} />
                 <strong>Scan Videos</strong>
-                <span>Import videos, extract frames, and create AI suggestions.</span>
+                <span>Save video records, then extract smart frames from Media.</span>
               </button>
               <button onClick={() => setActiveTab("media")}>
                 <GalleryHorizontalEnd size={22} />
@@ -790,7 +799,7 @@ export default function App() {
             <div className="workflow-note">
               {activeTab === "images"
                 ? "Use this for completed, partial, or unlabeled image datasets. Scan saves database records and matches labels by image filename stem."
-                : "Use this for traffic videos. Scan saves the video folder, extracts vehicle-detected frames, and can create AI draft boxes."}
+                : "Use this for traffic videos. Scan only saves video records; open Media to extract smart vehicle-change frames from a selected video."}
             </div>
             <div className="import-grid">
               <label>
@@ -841,28 +850,20 @@ export default function App() {
                       placeholder="C:\\datasets\\traffic\\videos"
                     />
                   </label>
-                  <label>
-                    <span>Frame sample seconds</span>
-                    <input
-                      type="number"
-                      min="0.1"
-                      step="0.1"
-                      value={sampleEverySeconds}
-                      onChange={(event) => setSampleEverySeconds(Number(event.target.value))}
-                    />
-                  </label>
                 </>
               ) : null}
-              <label>
-                <span>Label task</span>
-                <select
-                  value={importTask}
-                  onChange={(event) => setImportTask(event.target.value as "vehicle" | "plate")}
-                >
-                  <option value="vehicle">Vehicle</option>
-                  <option value="plate">Number plate</option>
-                </select>
-              </label>
+              {importImages ? (
+                <label>
+                  <span>Label task</span>
+                  <select
+                    value={importTask}
+                    onChange={(event) => setImportTask(event.target.value as "vehicle" | "plate")}
+                  >
+                    <option value="vehicle">Vehicle</option>
+                    <option value="plate">Number plate</option>
+                  </select>
+                </label>
+              ) : null}
               <label>
                 <span>Duplicates</span>
                 <select
@@ -875,8 +876,6 @@ export default function App() {
                   <option value="import_copy">Import copies</option>
                 </select>
               </label>
-              {modelSelect("vehicle")}
-              {modelSelect("plate")}
             </div>
 
             <div className="option-strip">
@@ -895,24 +894,6 @@ export default function App() {
                   onChange={(event) => setImportVideos(event.target.checked)}
                 />
                 Videos
-              </label>
-              {importVideos ? (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={extractVideoFrames}
-                    onChange={(event) => setExtractVideoFrames(event.target.checked)}
-                  />
-                  Extract frames
-                </label>
-              ) : null}
-              <label>
-                <input
-                  type="checkbox"
-                  checked={autoAnnotate}
-                  onChange={(event) => setAutoAnnotate(event.target.checked)}
-                />
-                AI suggestions
               </label>
             </div>
 
@@ -985,18 +966,17 @@ export default function App() {
             </div>
             <div className="gallery-grid home-gallery">
               {!openFolder
-                ? importFolders.map((folder) => (
-                    <div className="gallery-tile media-card" key={folder.history.id}>
+                ? scanFolders.map((folder) => (
+                    <div className="gallery-tile media-card" key={folder.key}>
                       <div className="video-thumb">
                         <FolderSearch size={30} />
                       </div>
-                      <span>{folderLabel(folder.history)}</span>
+                      <span>{folderLabel(folder.latest)}</span>
                       <small>
-                        {folder.images || folder.history.importedImages + folder.history.importedFrames} images/frames,{" "}
-                        {folder.videos || folder.history.importedVideos} videos
+                        {folder.images} images, {folder.videos} videos, {folder.histories.length} scan{folder.histories.length === 1 ? "" : "s"}
                       </small>
                       <div className="card-actions">
-                        <button onClick={() => setOpenFolder({ kind: "import", id: folder.history.id })}>
+                        <button onClick={() => setOpenFolder({ kind: "import", id: folder.key })}>
                           Open folder
                         </button>
                       </div>
@@ -1012,8 +992,8 @@ export default function App() {
                   <FrameStatus count={frameCountForVideo(annotatableMedia, item.id)} />
                   <div className="card-actions">
                     <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
-                    <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Extract frames</button>
-                    <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Extract + AI</button>
+                    <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Smart frames</button>
+                    <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Smart frames + AI</button>
                   </div>
                 </div>
               ))}
@@ -1033,7 +1013,7 @@ export default function App() {
               {annotatableMedia.length === 0 && videos.length === 0 ? (
                 <div className="empty-gallery">No imported media</div>
               ) : null}
-              {!openFolder && importFolders.length > 0 && visibleFrames.length === 0 && visibleVideos.length === 0 ? null : null}
+              {!openFolder && scanFolders.length > 0 && visibleFrames.length === 0 && visibleVideos.length === 0 ? null : null}
               {openFolder && visibleFrames.length === 0 && visibleVideos.length === 0 ? (
                 <div className="empty-gallery">No media in this folder</div>
               ) : null}
@@ -1085,9 +1065,17 @@ function frameCountForVideo(media: MediaSample[], videoId: string) {
   return media.filter((item) => item.parentMediaId === videoId).length;
 }
 
+function folderKey(item: ImportHistoryItem) {
+  const path =
+    item.sourceType === "video_folder"
+      ? item.parentDir || item.videoDir || item.imageDir
+      : item.parentDir || item.imageDir || item.videoDir;
+  return `${item.sourceType}:${normalizePath(path || item.id)}`;
+}
+
 function folderLabel(item: ImportHistoryItem) {
   const path = item.parentDir || item.imageDir || item.videoDir || "Import";
-  const normalized = path.replace(/\\/g, "/");
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
   const name = normalized.split("/").filter(Boolean).pop();
   if (item.sourceType === "video_folder") {
     return name ? `Video import: ${name}` : "Video import";
@@ -1096,6 +1084,10 @@ function folderLabel(item: ImportHistoryItem) {
     return name ? `Image import: ${name}` : "Image import";
   }
   return name ? `Mixed import: ${name}` : "Mixed import";
+}
+
+function normalizePath(path: string) {
+  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
 function clamp(value: number, min: number, max: number) {

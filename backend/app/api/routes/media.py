@@ -819,12 +819,17 @@ def extract_video_frames(
         )
         return []
 
-    fps = float(capture.get(cv2.CAP_PROP_FPS) or 25)
-    step = max(1, int(fps * payload.video_sample_every_seconds))
     detector = load_vehicle_frame_detector(payload, report)
+    if detector is None:
+        capture.release()
+        return []
+
+    fps = float(capture.get(cv2.CAP_PROP_FPS) or 25)
+    step = max(1, int(fps * 0.5))
     frames: list[models.MediaItem] = []
     frame_number = 0
     saved_index = 0
+    previous_detections: list[dict[str, float]] | None = None
     safe_video_name = safe_path_name(video_path.stem or Path(video_item.file_name).stem)
     frame_folder_name = f"{safe_video_name}_{str(video_item.id)[:8]}"
     video_frame_root = frame_root / frame_folder_name
@@ -834,7 +839,11 @@ def extract_video_frames(
         ok, frame = capture.read()
         if not ok:
             break
-        if frame_number % step == 0 and should_save_video_frame(detector, frame):
+        if frame_number % step == 0:
+            detections = detect_vehicle_boxes(detector, frame, payload.vehicle_model_key)
+            if not should_save_video_frame(detections, previous_detections):
+                frame_number += 1
+                continue
             timestamp = frame_number / fps if fps else 0
             timestamp_ms = int(timestamp * 1000)
             frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
@@ -859,6 +868,7 @@ def extract_video_frames(
             frames.append(frame_item)
             report.imported_frames += 1
             saved_index += 1
+            previous_detections = detections
         frame_number += 1
 
     capture.release()
@@ -872,7 +882,7 @@ def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: Serve
             ImportIssue(
                 path=str(model_path),
                 issue_type="missing_vehicle_model",
-                message="Smart video frame capture needs a vehicle model; falling back to sampled frames.",
+                message="Smart video frame capture needs a vehicle model.",
             )
         )
         return None
@@ -885,20 +895,54 @@ def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: Serve
             ImportIssue(
                 path=str(model_path),
                 issue_type="vehicle_model_load_failed",
-                message=f"Smart video frame capture fell back to sampled frames: {exc}",
+                message=f"Smart video frame capture could not load the vehicle model: {exc}",
             )
         )
         return None
 
 
-def should_save_video_frame(detector, frame) -> bool:
-    if detector is None:
-        return True
+def detect_vehicle_boxes(detector, frame, model_key: str | None) -> list[dict[str, float]]:
     try:
         results = detector.predict(frame, verbose=False, device=inference_device())
     except Exception:
+        return []
+
+    detections: list[dict[str, float]] = []
+    for result in results:
+        image_height, image_width = result.orig_shape[:2]
+        for box in result.boxes:
+            if map_model_class(AnnotationTask.VEHICLE, int(box.cls.item()), model_key) is None:
+                continue
+            x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
+            width = max(0.0, x2 - x1)
+            height = max(0.0, y2 - y1)
+            if width <= 0 or height <= 0:
+                continue
+            detections.append(
+                {
+                    "x_center": (x1 + width / 2) / float(image_width),
+                    "y_center": (y1 + height / 2) / float(image_height),
+                    "width": width / float(image_width),
+                    "height": height / float(image_height),
+                }
+            )
+    return detections
+
+
+def should_save_video_frame(
+    detections: list[dict[str, float]],
+    previous_detections: list[dict[str, float]] | None,
+) -> bool:
+    if not detections:
         return False
-    return any(len(result.boxes) > 0 for result in results)
+    if previous_detections is None:
+        return True
+    if len(detections) != len(previous_detections):
+        return True
+    return any(
+        max((box_iou(detection, previous) for previous in previous_detections), default=0.0) < 0.65
+        for detection in detections
+    )
 
 
 def import_labels_for_media(
