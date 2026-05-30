@@ -1,7 +1,7 @@
 import { classes } from "./data/sample";
 import type { Annotation, AnnotationClass, AnnotationTask, Box, MediaSample } from "./types";
 
-const API_BASE = "";
+const API_BASE = backendBaseUrl();
 
 type ApiDataset = {
   id: string;
@@ -176,7 +176,7 @@ export async function listMedia(datasetId: string): Promise<MediaSample[]> {
   return media.map((item) => ({
     id: item.id,
     fileName: item.file_name,
-    imageUrl: item.image_url,
+    imageUrl: mediaUrl(item.image_url),
     mediaType: item.media_type,
     width: item.width,
     height: item.height,
@@ -207,7 +207,7 @@ export async function uploadImages(datasetId: string, files: FileList): Promise<
   return media.map((item) => ({
     id: item.id,
     fileName: item.file_name,
-    imageUrl: item.image_url,
+    imageUrl: mediaUrl(item.image_url),
     mediaType: item.media_type,
     width: item.width,
     height: item.height
@@ -361,7 +361,7 @@ async function importFolderAt(path: string, payload: FolderPayload) {
     media: result.media.map((item) => ({
       id: item.id,
       fileName: item.file_name,
-      imageUrl: item.image_url,
+      imageUrl: mediaUrl(item.image_url),
       mediaType: item.media_type,
       width: item.width,
       height: item.height,
@@ -611,6 +611,24 @@ function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     return response.json() as Promise<T>;
   });
+}
+
+function backendBaseUrl() {
+  const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (configured) {
+    return configured.replace(/\/+$/, "");
+  }
+  if (window.location.hostname === "annotation.sanjibkasti.com.np") {
+    return "https://aback.sanjibkasti.com.np";
+  }
+  return "";
+}
+
+function mediaUrl(path: string) {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  return `${API_BASE}${path}`;
 }
 
 function fromApiAnnotation(annotation: ApiAnnotation): Annotation {

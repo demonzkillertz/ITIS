@@ -15,7 +15,10 @@ class Settings(BaseSettings):
     storage_root: Path = Path("../storage")
     vehicle_model_path: Path = Path("../storage/models/vehicle.pt")
     plate_model_path: Path = Path("../storage/models/plate.pt")
-    cors_origins_raw: str = Field("http://localhost:5173", alias="CORS_ORIGINS")
+    cors_origins_raw: str = Field(
+        "http://localhost:5173,http://127.0.0.1:5173,http://127.0.0.1:5174,https://annotation.sanjibkasti.com.np",
+        alias="CORS_ORIGINS",
+    )
 
     @property
     def cors_origins(self) -> list[str]:

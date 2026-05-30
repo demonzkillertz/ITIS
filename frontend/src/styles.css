@@ -449,18 +449,6 @@
     @apply h-8 w-full min-w-0 rounded-md border border-slate-600 bg-slate-950 px-2 text-sm text-slate-200 placeholder:text-slate-500;
   }
 
-  .folder-action-menu {
-    @apply mt-1 grid gap-2 rounded-md border border-slate-600 bg-slate-950 p-2;
-  }
-
-  .folder-action-menu label {
-    @apply grid gap-1 text-xs text-blue-100;
-  }
-
-  .folder-action-menu button {
-    @apply inline-flex min-h-[32px] items-center justify-center gap-2 rounded-md border border-slate-600 bg-slate-800 px-2 text-slate-200 hover:border-sky-400;
-  }
-
   .gallery-tile small,
   .history-row span,
   .history-row small {
@@ -509,6 +497,26 @@
 
   .directory-dialog {
     @apply grid max-h-[min(720px,90vh)] w-[min(720px,100%)] gap-2.5 overflow-hidden rounded-lg border border-slate-600 bg-slate-900 p-3.5;
+  }
+
+  .folder-action-dialog {
+    @apply grid w-[min(460px,100%)] gap-3 rounded-lg border border-slate-600 bg-slate-900 p-4 shadow-2xl shadow-black/40;
+  }
+
+  .folder-action-dialog p {
+    @apply mt-1 text-sm text-slate-400;
+  }
+
+  .folder-action-dialog label {
+    @apply grid gap-1.5 text-sm text-blue-100;
+  }
+
+  .folder-dialog-actions {
+    @apply grid gap-2;
+  }
+
+  .folder-dialog-actions button {
+    @apply inline-flex min-h-[36px] items-center justify-center gap-2 rounded-md border border-slate-600 bg-slate-800 px-3 text-slate-200 hover:border-sky-400;
   }
 
   .dialog-title,

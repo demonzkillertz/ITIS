@@ -149,6 +149,10 @@ export default function App() {
     },
     [importHistory, mediaItems]
   );
+  const folderMenu = useMemo(
+    () => scanFolders.find((folder) => folder.key === folderMenuKey) ?? null,
+    [folderMenuKey, scanFolders]
+  );
   const visibleFrames = useMemo(
     () => {
       if (openFolder?.kind === "video") {
@@ -1359,52 +1363,6 @@ export default function App() {
                       <small>
                         {folder.images} images, {folder.videos} videos, {folder.histories.length} scan{folder.histories.length === 1 ? "" : "s"}
                       </small>
-                      {folderMenuKey === folder.key ? (
-                        <div className="folder-action-menu" onClick={(event) => event.stopPropagation()}>
-                          <label>
-                            <span>Display name</span>
-                            <input
-                              className="folder-card-input"
-                              value={folderAliases[folder.key] ?? ""}
-                              onChange={(event) => renameFolder(folder.key, event.target.value)}
-                              placeholder="Folder display name"
-                              aria-label={`Rename ${folderLabel(folder.latest)}`}
-                            />
-                          </label>
-                          <button onClick={() => {
-                            setSelectedMediaIds(new Set(folder.media.filter((item) => item.mediaType === "image").map((item) => item.id)));
-                            setSelectedFolderKey(folder.key);
-                            setStatus(`Selected ${folder.images} image${folder.images === 1 ? "" : "s"} from ${folderAliases[folder.key] || folderLabel(folder.latest)}`);
-                          }}>
-                            {selectedFolderKey === folder.key ? <SquareCheck size={15} /> : <Square size={15} />}
-                            Select images
-                          </button>
-                          <button
-                            onClick={() => setAiMenuKey(aiMenuKey === folder.key ? null : folder.key)}
-                            disabled={isProcessing || folder.images === 0}
-                          >
-                            <MoreHorizontal size={15} />
-                            AI annotations
-                          </button>
-                          <button onClick={() => handleDeleteImportFolder(folder)} disabled={isProcessing}>
-                            <Trash2 size={15} />
-                            Delete folder
-                          </button>
-                          {aiMenuKey === folder.key ? (
-                            <AiAnnotationMenu
-                              vehicleModel={modelSelect("vehicle", true)}
-                              plateModel={modelSelect("plate", true)}
-                              tasks={bulkTasks}
-                              onToggleTask={(task) => setBulkTasks((current) => ({ ...current, [task]: !current[task] }))}
-                              onRun={() => {
-                                setAiMenuKey(null);
-                                setFolderMenuKey(null);
-                                handleBulkAiForTasks(folder.media.filter((item) => item.mediaType === "image"), selectedBulkTasks());
-                              }}
-                            />
-                          ) : null}
-                        </div>
-                      ) : null}
                     </div>
                   ))
                 : null}
@@ -1463,6 +1421,70 @@ export default function App() {
                 <div className="empty-gallery">No media in this folder</div>
               ) : null}
             </div>
+            {folderMenu ? (
+              <div className="dialog-backdrop" role="dialog" aria-modal="true">
+                <div className="folder-action-dialog">
+                  <div className="dialog-title">
+                    <div>
+                      <h2>{folderAliases[folderMenu.key] || folderLabel(folderMenu.latest)}</h2>
+                      <p>
+                        {folderMenu.images} images, {folderMenu.videos} videos, {folderMenu.histories.length} scan{folderMenu.histories.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <button onClick={() => {
+                      setFolderMenuKey(null);
+                      setAiMenuKey((current) => (current === folderMenu.key ? null : current));
+                    }}>
+                      Close
+                    </button>
+                  </div>
+                  <label>
+                    <span>Display name</span>
+                    <input
+                      className="folder-card-input"
+                      value={folderAliases[folderMenu.key] ?? ""}
+                      onChange={(event) => renameFolder(folderMenu.key, event.target.value)}
+                      placeholder="Folder display name"
+                      aria-label={`Rename ${folderLabel(folderMenu.latest)}`}
+                    />
+                  </label>
+                  <div className="folder-dialog-actions">
+                    <button onClick={() => {
+                      setSelectedMediaIds(new Set(folderMenu.media.filter((item) => item.mediaType === "image").map((item) => item.id)));
+                      setSelectedFolderKey(folderMenu.key);
+                      setStatus(`Selected ${folderMenu.images} image${folderMenu.images === 1 ? "" : "s"} from ${folderAliases[folderMenu.key] || folderLabel(folderMenu.latest)}`);
+                    }}>
+                      {selectedFolderKey === folderMenu.key ? <SquareCheck size={16} /> : <Square size={16} />}
+                      Select images
+                    </button>
+                    <button
+                      onClick={() => setAiMenuKey(aiMenuKey === folderMenu.key ? null : folderMenu.key)}
+                      disabled={isProcessing || folderMenu.images === 0}
+                    >
+                      <MoreHorizontal size={16} />
+                      AI annotations
+                    </button>
+                    <button onClick={() => handleDeleteImportFolder(folderMenu)} disabled={isProcessing}>
+                      <Trash2 size={16} />
+                      Delete folder
+                    </button>
+                  </div>
+                  {aiMenuKey === folderMenu.key ? (
+                    <AiAnnotationMenu
+                      vehicleModel={modelSelect("vehicle", true)}
+                      plateModel={modelSelect("plate", true)}
+                      tasks={bulkTasks}
+                      onToggleTask={(task) => setBulkTasks((current) => ({ ...current, [task]: !current[task] }))}
+                      onRun={() => {
+                        setAiMenuKey(null);
+                        setFolderMenuKey(null);
+                        handleBulkAiForTasks(folderMenu.media.filter((item) => item.mediaType === "image"), selectedBulkTasks());
+                      }}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </section>
           } />
 
