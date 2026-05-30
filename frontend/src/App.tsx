@@ -393,6 +393,7 @@ export default function App() {
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
       setActiveTab("media");
+      setOpenFolder({ kind: "video", id: video.id });
       setStatus(result.message ?? "Frames extracted");
       setFrameProgress(null);
     }).catch((error) => {

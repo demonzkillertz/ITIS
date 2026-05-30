@@ -559,18 +559,21 @@ def extract_frames_for_video_sync(
     tasks = payload.tasks or [payload.task]
     primary_task = tasks[0]
     report = ServerFolderImportRead(task=primary_task)
-    import_session = models.ImportSession(
-        dataset_id=video_item.dataset_id,
-        parent_dir=None,
-        image_dir="",
-        video_dir=video_item.source_path or video_item.file_name,
-        label_dir=None,
-        source_type=ImportSourceType.VIDEO_FOLDER,
-        task=primary_task,
-        duplicate_policy=DuplicatePolicy.IMPORT_COPY,
-    )
-    db.add(import_session)
-    db.flush()
+    import_session = db.get(models.ImportSession, video_item.import_session_id) if video_item.import_session_id else None
+    created_import_session = import_session is None
+    if import_session is None:
+        import_session = models.ImportSession(
+            dataset_id=video_item.dataset_id,
+            parent_dir=None,
+            image_dir="",
+            video_dir=video_item.source_path or video_item.file_name,
+            label_dir=None,
+            source_type=ImportSourceType.VIDEO_FOLDER,
+            task=primary_task,
+            duplicate_policy=DuplicatePolicy.IMPORT_COPY,
+        )
+        db.add(import_session)
+        db.flush()
 
     frames = extract_video_frames(
         db,
@@ -595,9 +598,14 @@ def extract_frames_for_video_sync(
                 model_key = payload.vehicle_model_key if task == AnnotationTask.VEHICLE else payload.plate_model_key
                 auto_annotate_image(db, frame_item, ServerFolderImportCreate(task=task), report, model_key)
 
-    import_session.imported_frames = report.imported_frames
-    import_session.model_annotations = report.model_annotations
-    import_session.issue_count = len(report.issues)
+    if created_import_session:
+        import_session.imported_frames = report.imported_frames
+        import_session.model_annotations = report.model_annotations
+        import_session.issue_count = len(report.issues)
+    else:
+        import_session.imported_frames = (import_session.imported_frames or 0) + report.imported_frames
+        import_session.model_annotations = (import_session.model_annotations or 0) + report.model_annotations
+        import_session.issue_count = (import_session.issue_count or 0) + len(report.issues)
     db.commit()
 
     return ProcessingJobRead(
