@@ -23,6 +23,7 @@ from app.domain.schemas import (
     ImportSourceType,
     ImportIssue,
     ImportSessionRead,
+    ImportSessionsDeleteCreate,
     MediaType,
     MediaRead,
     ProcessingJobRead,
@@ -72,6 +73,7 @@ def delete_media_item(media_id: UUID, db: Session = Depends(get_db)) -> Processi
         select(models.MediaItem).where(models.MediaItem.parent_media_id == media_item.id)
     ).all()
     media_ids = [item.id for item in child_items] + [media_item.id]
+    remove_generated_frame_files([*child_items, media_item])
     db.execute(delete(models.Annotation).where(models.Annotation.media_id.in_(media_ids)))
     db.execute(delete(models.MediaItem).where(models.MediaItem.id.in_(media_ids)))
     db.commit()
@@ -81,6 +83,54 @@ def delete_media_item(media_id: UUID, db: Session = Depends(get_db)) -> Processi
         kind="media_delete",
         status="completed",
         message=f"Deleted {removed_count} media item{'' if removed_count == 1 else 's'}",
+    )
+
+
+@router.post("/{dataset_id}/import-sessions/delete", response_model=ProcessingJobRead)
+def delete_import_sessions(
+    dataset_id: UUID,
+    payload: ImportSessionsDeleteCreate,
+    db: Session = Depends(get_db),
+) -> ProcessingJobRead:
+    ensure_dataset(db, dataset_id)
+    session_ids = set(payload.session_ids)
+    sessions = db.scalars(
+        select(models.ImportSession).where(
+            models.ImportSession.dataset_id == dataset_id,
+            models.ImportSession.id.in_(session_ids),
+        )
+    ).all()
+    if len(sessions) != len(session_ids):
+        raise HTTPException(status_code=404, detail="Import folder not found")
+
+    media_items = db.scalars(
+        select(models.MediaItem).where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.import_session_id.in_(session_ids),
+        )
+    ).all()
+    parent_media_ids = [item.id for item in media_items if item.media_type == MediaType.VIDEO.value]
+    if parent_media_ids:
+        child_items = db.scalars(
+            select(models.MediaItem).where(
+                models.MediaItem.dataset_id == dataset_id,
+                models.MediaItem.parent_media_id.in_(parent_media_ids),
+            )
+        ).all()
+        media_items = list({item.id: item for item in [*media_items, *child_items]}.values())
+    media_ids = [item.id for item in media_items]
+    remove_generated_frame_files(media_items)
+    if media_ids:
+        db.execute(delete(models.Annotation).where(models.Annotation.media_id.in_(media_ids)))
+        db.execute(delete(models.MediaItem).where(models.MediaItem.id.in_(media_ids)))
+    db.execute(delete(models.ImportSession).where(models.ImportSession.id.in_(session_ids)))
+    db.commit()
+
+    removed_count = len(media_ids)
+    return ProcessingJobRead(
+        kind="import_folder_delete",
+        status="completed",
+        message=f"Deleted {removed_count} media record{'' if removed_count == 1 else 's'}",
     )
 
 
@@ -737,6 +787,38 @@ def path_for_media(item: models.MediaItem) -> Path:
             return source_path
 
     return storage_path
+
+
+def remove_generated_frame_files(items: list[models.MediaItem]) -> None:
+    storage_root = settings.storage_root.resolve()
+    removable_paths: list[Path] = []
+    for item in items:
+        if item.media_type != MediaType.IMAGE.value or item.parent_media_id is None:
+            continue
+        storage_key_path = Path(item.storage_key)
+        if storage_key_path.is_absolute():
+            continue
+        if not storage_key_path.parts or storage_key_path.parts[0] != "frames":
+            continue
+        frame_path = (settings.storage_root / storage_key_path).resolve()
+        if not frame_path.is_relative_to(storage_root):
+            continue
+        if frame_path.exists() and frame_path.is_file():
+            try:
+                frame_path.unlink()
+                removable_paths.append(frame_path.parent)
+            except OSError:
+                continue
+
+    frame_root = (settings.storage_root / "frames").resolve()
+    for directory in sorted(set(removable_paths), key=lambda path: len(path.parts), reverse=True):
+        current = directory
+        while current != frame_root and current.is_relative_to(frame_root):
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
 
 def ensure_dataset(db: Session, dataset_id: UUID) -> models.Dataset:

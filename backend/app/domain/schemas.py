@@ -180,6 +180,10 @@ class FrameExtractionCreate(BaseModel):
     plate_model_key: str | None = None
 
 
+class ImportSessionsDeleteCreate(BaseModel):
+    session_ids: list[UUID] = Field(min_length=1)
+
+
 class ModelOptionRead(BaseModel):
     key: str
     label: str

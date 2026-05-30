@@ -25,6 +25,7 @@ import {
   autoAnnotateMedia,
   browseDirectories,
   deleteMedia,
+  deleteImportSessions,
   downloadModels,
   ensureDataset,
   extractFrames,
@@ -51,6 +52,14 @@ type ScanResult = {
   issue_count: number;
 };
 type OpenFolder = { kind: "import" | "video"; id: string } | null;
+type ScanFolder = {
+  key: string;
+  latest: ImportHistoryItem;
+  histories: ImportHistoryItem[];
+  media: MediaSample[];
+  images: number;
+  videos: number;
+};
 
 export default function App() {
   const navigate = useNavigate();
@@ -107,7 +116,7 @@ export default function App() {
   );
   const videos = useMemo(() => mediaItems.filter((item) => item.mediaType === "video"), [mediaItems]);
   const [openFolder, setOpenFolder] = useState<OpenFolder>(null);
-  const scanFolders = useMemo(
+  const scanFolders = useMemo<ScanFolder[]>(
     () => {
       const groups = new Map<string, { history: ImportHistoryItem[]; media: MediaSample[] }>();
       importHistory
@@ -511,11 +520,52 @@ export default function App() {
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Delete failed"));
   }
 
+  async function handleDeleteImportFolder(folder: ScanFolder) {
+    if (!datasetId || folder.histories.length === 0) {
+      return;
+    }
+    const label = folderAliases[folder.key] || folderLabel(folder.latest);
+    const confirmed = window.confirm(
+      `Delete "${label}" from this dataset? Imported image records will be removed from the database. Generated video frame files and their empty frame folders will also be deleted.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    await runWithProgress(`Deleting ${label}`, async () => {
+      await deleteImportSessions(datasetId, folder.histories.map((item) => item.id));
+      await refreshDataset(datasetId);
+      setAnnotationsByMedia((current) => {
+        const next = { ...current };
+        folder.media.forEach((item) => delete next[item.id]);
+        return next;
+      });
+      setSelectedMediaIds((current) => {
+        const next = new Set(current);
+        folder.media.forEach((item) => next.delete(item.id));
+        return next;
+      });
+      setFolderAliases((current) => {
+        const next = { ...current };
+        delete next[folder.key];
+        return next;
+      });
+      if (openFolder?.kind === "import" && openFolder.id === folder.key) {
+        setOpenFolder(null);
+      }
+      setAiMenuKey((current) => (current === folder.key ? null : current));
+      setStatus(`Deleted ${label}`);
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Delete folder failed"));
+  }
+
+  function renameFolder(folderId: string, value: string) {
+    setFolderAliases((current) => ({ ...current, [folderId]: value }));
+  }
+
   function renameOpenFolder(value: string) {
     if (!openFolder) {
       return;
     }
-    setFolderAliases((current) => ({ ...current, [openFolder.id]: value }));
+    renameFolder(openFolder.id, value);
   }
 
   function goTo(delta: number) {
@@ -1257,6 +1307,13 @@ export default function App() {
                         <FolderSearch size={30} />
                       </div>
                       <span>{folderAliases[folder.key] || folderLabel(folder.latest)}</span>
+                      <input
+                        className="folder-card-input"
+                        value={folderAliases[folder.key] ?? ""}
+                        onChange={(event) => renameFolder(folder.key, event.target.value)}
+                        placeholder="Folder display name"
+                        aria-label={`Rename ${folderLabel(folder.latest)}`}
+                      />
                       <small>
                         {folder.images} images, {folder.videos} videos, {folder.histories.length} scan{folder.histories.length === 1 ? "" : "s"}
                       </small>
@@ -1276,6 +1333,10 @@ export default function App() {
                         >
                           <MoreHorizontal size={15} />
                           AI annotations
+                        </button>
+                        <button onClick={() => handleDeleteImportFolder(folder)} disabled={isProcessing}>
+                          <Trash2 size={15} />
+                          Delete folder
                         </button>
                       </div>
                       {aiMenuKey === folder.key ? (

@@ -591,6 +591,13 @@ export async function deleteMedia(mediaId: string) {
   });
 }
 
+export async function deleteImportSessions(datasetId: string, sessionIds: string[]) {
+  return request<{ message?: string }>(`/api/media/${datasetId}/import-sessions/delete`, {
+    method: "POST",
+    body: JSON.stringify({ session_ids: sessionIds })
+  });
+}
+
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {
