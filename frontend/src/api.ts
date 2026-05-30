@@ -84,6 +84,16 @@ type ApiServerScanResult = {
   }>;
 };
 
+type ApiProcessingJob = {
+  id: string;
+  kind: string;
+  status: "queued" | "running" | "completed" | "failed";
+  message?: string | null;
+  progress_percent?: number;
+  progress_current?: number;
+  progress_total?: number;
+};
+
 type ApiImportHistoryItem = {
   id: string;
   dataset_id: string;
@@ -560,9 +570,10 @@ export async function extractFrames(
   autoAnnotate: boolean,
   tasks: AnnotationTask[],
   vehicleModelKey?: string,
-  plateModelKey?: string
+  plateModelKey?: string,
+  onProgress?: (job: ApiProcessingJob) => void
 ) {
-  return request<{ message?: string }>(`/api/media/${mediaId}/extract-frames`, {
+  const queued = await request<ApiProcessingJob>(`/api/media/${mediaId}/extract-frames`, {
     method: "POST",
     body: JSON.stringify({
       sample_every_seconds: sampleEverySeconds,
@@ -573,6 +584,26 @@ export async function extractFrames(
       plate_model_key: plateModelKey
     })
   });
+  onProgress?.(queued);
+  return pollProcessingJob(queued.id, onProgress);
+}
+
+async function pollProcessingJob(jobId: string, onProgress?: (job: ApiProcessingJob) => void) {
+  for (;;) {
+    await delay(700);
+    const job = await request<ApiProcessingJob>(`/api/media/frame-extraction-jobs/${jobId}`);
+    onProgress?.(job);
+    if (job.status === "completed") {
+      return { message: job.message };
+    }
+    if (job.status === "failed") {
+      throw new Error(job.message ?? "Frame extraction failed");
+    }
+  }
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export async function autoAnnotateMedia(mediaId: string, task: AnnotationTask, modelKey?: string) {

@@ -264,6 +264,10 @@
     @apply absolute inset-y-0 left-0 w-[38%] animate-[progress-slide_1.15s_linear_infinite] bg-gradient-to-r from-transparent via-sky-400/40 to-transparent;
   }
 
+  .progress-bar.determinate {
+    @apply animate-none bg-sky-500/45 transition-[width] duration-300;
+  }
+
   .home-gallery {
     @apply mt-3.5 min-h-[560px] border-0 bg-transparent p-0;
   }

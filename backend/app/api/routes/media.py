@@ -1,7 +1,10 @@
 import re
 import shutil
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from uuid import UUID
 from uuid import uuid4
 
@@ -13,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db import models
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.domain.classes import AnnotationTask
 from app.domain.schemas import AnnotationSource, AnnotationStatus
 from app.domain.schemas import (
@@ -24,6 +27,7 @@ from app.domain.schemas import (
     ImportIssue,
     ImportSessionRead,
     ImportSessionsDeleteCreate,
+    JobStatus,
     MediaType,
     MediaRead,
     ProcessingJobRead,
@@ -39,6 +43,10 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 YOLO_IMAGE_SIZE = 960
 YOLO_BATCH_SIZE = 16
+FRAME_EXTRACTION_WORKERS = 2
+FRAME_EXTRACTION_EXECUTOR = ThreadPoolExecutor(max_workers=FRAME_EXTRACTION_WORKERS)
+FRAME_JOBS: dict[UUID, ProcessingJobRead] = {}
+FRAME_JOBS_LOCK = Lock()
 
 
 @router.get("/item/{media_id}/content")
@@ -492,6 +500,59 @@ def extract_frames_for_video(
     if video_item.media_type != MediaType.VIDEO.value:
         raise HTTPException(status_code=400, detail="Selected media is not a video")
 
+    job = ProcessingJobRead(
+        kind="frame_extraction",
+        status=JobStatus.QUEUED,
+        message=f"Queued frame extraction for {video_item.file_name}",
+    )
+    set_frame_job(job)
+    FRAME_EXTRACTION_EXECUTOR.submit(run_frame_extraction_job, job.id, media_id, payload)
+    return job
+
+
+@router.get("/frame-extraction-jobs/{job_id}", response_model=ProcessingJobRead)
+def read_frame_extraction_job(job_id: UUID) -> ProcessingJobRead:
+    with FRAME_JOBS_LOCK:
+        job = FRAME_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Frame extraction job not found")
+    return job
+
+
+def run_frame_extraction_job(job_id: UUID, media_id: UUID, payload: FrameExtractionCreate) -> None:
+    db = SessionLocal()
+    try:
+        update_frame_job(job_id, status=JobStatus.RUNNING, message="Preparing video")
+        video_item = db.get(models.MediaItem, media_id)
+        if video_item is None:
+            update_frame_job(job_id, status=JobStatus.FAILED, message="Video not found")
+            return
+        if video_item.media_type != MediaType.VIDEO.value:
+            update_frame_job(job_id, status=JobStatus.FAILED, message="Selected media is not a video")
+            return
+
+        result = extract_frames_for_video_sync(video_item, payload, db, job_id)
+        update_frame_job(
+            job_id,
+            status=JobStatus.COMPLETED,
+            message=result.message,
+            progress_percent=100,
+            progress_current=max(1, get_frame_job(job_id).progress_total),
+            progress_total=max(1, get_frame_job(job_id).progress_total),
+        )
+    except Exception as exc:
+        db.rollback()
+        update_frame_job(job_id, status=JobStatus.FAILED, message=str(exc))
+    finally:
+        db.close()
+
+
+def extract_frames_for_video_sync(
+    video_item: models.MediaItem,
+    payload: FrameExtractionCreate,
+    db: Session,
+    job_id: UUID | None = None,
+) -> ProcessingJobRead:
     video_path = path_for_media(video_item)
     frame_root = settings.storage_root / "frames" / str(video_item.dataset_id)
     frame_root.mkdir(parents=True, exist_ok=True)
@@ -526,6 +587,7 @@ def extract_frames_for_video(
         ),
         report,
         import_session.id,
+        (lambda current, total: update_frame_progress(job_id, current, total)) if job_id else None,
     )
     if payload.auto_annotate:
         for frame_item in frames:
@@ -540,8 +602,9 @@ def extract_frames_for_video(
 
     return ProcessingJobRead(
         kind="frame_extraction",
-        status="completed",
+        status=JobStatus.COMPLETED,
         message=f"Extracted {report.imported_frames} frames and created {report.model_annotations} AI boxes",
+        progress_percent=100,
     )
 
 
@@ -962,6 +1025,39 @@ def safe_path_name(value: str) -> str:
     return cleaned or "video"
 
 
+def set_frame_job(job: ProcessingJobRead) -> None:
+    with FRAME_JOBS_LOCK:
+        FRAME_JOBS[job.id] = job
+
+
+def get_frame_job(job_id: UUID) -> ProcessingJobRead:
+    with FRAME_JOBS_LOCK:
+        return FRAME_JOBS[job_id]
+
+
+def update_frame_job(job_id: UUID, **updates: object) -> None:
+    with FRAME_JOBS_LOCK:
+        job = FRAME_JOBS.get(job_id)
+        if job is None:
+            return
+        for key, value in updates.items():
+            setattr(job, key, value)
+
+
+def update_frame_progress(job_id: UUID | None, current: int, total: int) -> None:
+    if job_id is None:
+        return
+    bounded_total = max(1, total)
+    bounded_current = min(max(0, current), bounded_total)
+    update_frame_job(
+        job_id,
+        progress_current=bounded_current,
+        progress_total=bounded_total,
+        progress_percent=round((bounded_current / bounded_total) * 100),
+        message=f"Extracting frames {round((bounded_current / bounded_total) * 100)}%",
+    )
+
+
 def extract_video_frames(
     db: Session,
     dataset_id: UUID,
@@ -971,6 +1067,7 @@ def extract_video_frames(
     payload: ServerFolderImportCreate,
     report: ServerFolderImportRead,
     import_session_id: UUID,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> list[models.MediaItem]:
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
@@ -1003,46 +1100,63 @@ def extract_video_frames(
     video_frame_root.mkdir(parents=True, exist_ok=True)
 
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    total_samples = max(1, ((total_frames - 1) // step) + 1) if total_frames > 0 else 1
+    processed_samples = 0
+    if progress_callback:
+        progress_callback(processed_samples, total_samples)
+
     while total_frames <= 0 or frame_number < total_frames:
-        if step > 1:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        ok, frame = capture.read()
-        if not ok:
+        batch_frames = []
+        batch_numbers = []
+        for _ in range(YOLO_BATCH_SIZE):
+            if total_frames > 0 and frame_number >= total_frames:
+                break
+            if step > 1:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ok, frame = capture.read()
+            if not ok:
+                break
+            batch_frames.append(frame)
+            batch_numbers.append(frame_number)
+            frame_number += step
+        if not batch_frames:
             break
-        detections = detect_vehicle_boxes(detector, frame, payload.vehicle_model_key)
-        if not should_save_video_frame(detections, previous_detections):
-            frame_number += step
-            continue
-        timestamp = frame_number / fps if fps else 0
-        timestamp_ms = int(timestamp * 1000)
-        if timestamp_ms in existing_timestamps:
-            frame_number += step
-            continue
-        frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
-        frame_path = video_frame_root / frame_name
-        cv2.imwrite(str(frame_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
-        height, width = frame.shape[:2]
-        frame_item = models.MediaItem(
-            dataset_id=dataset_id,
-            file_name=frame_name,
-            storage_key=f"frames/{dataset_id}/{frame_folder_name}/{frame_name}",
-            media_type=MediaType.IMAGE.value,
-            source_path=str(video_path),
-            import_session_id=import_session_id,
-            parent_media_id=video_item.id,
-            width=int(width),
-            height=int(height),
-            frame_index=saved_index,
-            timestamp_seconds=float(timestamp),
-        )
-        db.add(frame_item)
-        db.flush()
-        frames.append(frame_item)
-        report.imported_frames += 1
-        saved_index += 1
-        existing_timestamps.add(timestamp_ms)
-        previous_detections = detections
-        frame_number += step
+
+        batch_detections = detect_vehicle_boxes_batch(detector, batch_frames, payload.vehicle_model_key)
+        for frame, sampled_frame_number, detections in zip(batch_frames, batch_numbers, batch_detections):
+            processed_samples += 1
+            if not should_save_video_frame(detections, previous_detections):
+                continue
+            timestamp = sampled_frame_number / fps if fps else 0
+            timestamp_ms = int(timestamp * 1000)
+            if timestamp_ms in existing_timestamps:
+                continue
+            frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
+            frame_path = video_frame_root / frame_name
+            cv2.imwrite(str(frame_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+            height, width = frame.shape[:2]
+            frame_item = models.MediaItem(
+                dataset_id=dataset_id,
+                file_name=frame_name,
+                storage_key=f"frames/{dataset_id}/{frame_folder_name}/{frame_name}",
+                media_type=MediaType.IMAGE.value,
+                source_path=str(video_path),
+                import_session_id=import_session_id,
+                parent_media_id=video_item.id,
+                width=int(width),
+                height=int(height),
+                frame_index=saved_index,
+                timestamp_seconds=float(timestamp),
+            )
+            db.add(frame_item)
+            db.flush()
+            frames.append(frame_item)
+            report.imported_frames += 1
+            saved_index += 1
+            existing_timestamps.add(timestamp_ms)
+            previous_detections = detections
+        if progress_callback:
+            progress_callback(processed_samples, total_samples)
 
     capture.release()
     return frames
@@ -1073,19 +1187,27 @@ def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: Serve
 
 
 def detect_vehicle_boxes(detector, frame, model_key: str | None) -> list[dict[str, float]]:
+    return detect_vehicle_boxes_batch(detector, [frame], model_key)[0]
+
+
+def detect_vehicle_boxes_batch(detector, frames: list[object], model_key: str | None) -> list[list[dict[str, float]]]:
+    if not frames:
+        return []
     try:
         results = detector.predict(
-            frame,
+            frames,
             verbose=False,
             device=inference_device(),
             half=inference_half_precision(),
             imgsz=YOLO_IMAGE_SIZE,
+            batch=min(YOLO_BATCH_SIZE, len(frames)),
         )
     except Exception:
-        return []
+        return [[] for _ in frames]
 
-    detections: list[dict[str, float]] = []
+    detections_by_frame: list[list[dict[str, float]]] = []
     for result in results:
+        detections: list[dict[str, float]] = []
         image_height, image_width = result.orig_shape[:2]
         for box in result.boxes:
             if map_model_class(AnnotationTask.VEHICLE, int(box.cls.item()), model_key) is None:
@@ -1103,7 +1225,10 @@ def detect_vehicle_boxes(detector, frame, model_key: str | None) -> list[dict[st
                     "height": height / float(image_height),
                 }
             )
-    return detections
+        detections_by_frame.append(detections)
+    while len(detections_by_frame) < len(frames):
+        detections_by_frame.append([])
+    return detections_by_frame
 
 
 def should_save_video_frame(

@@ -238,4 +238,7 @@ class ProcessingJobRead(BaseModel):
     kind: str
     status: JobStatus = JobStatus.QUEUED
     message: str | None = None
+    progress_percent: int = 0
+    progress_current: int = 0
+    progress_total: int = 0
     created_at: datetime = Field(default_factory=datetime.utcnow)

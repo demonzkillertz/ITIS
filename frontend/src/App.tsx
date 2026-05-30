@@ -98,6 +98,7 @@ export default function App() {
     }
   });
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [frameProgress, setFrameProgress] = useState<{ percent: number; current: number; total: number } | null>(null);
   const [aiMenuKey, setAiMenuKey] = useState<string | null>(null);
   const [folderMenuKey, setFolderMenuKey] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
@@ -175,7 +176,7 @@ export default function App() {
         return videos.filter((item) => item.importSessionId && sessionIds.has(item.importSessionId));
       }
       if (openFolder?.kind === "video") {
-        return videos.filter((item) => item.id === openFolder.id);
+        return [];
       }
       return videos.filter((item) => !item.importSessionId);
     },
@@ -375,19 +376,29 @@ export default function App() {
 
   async function handleExtractFrames(video: MediaSample, withAi = false) {
     await runWithProgress(`Extracting frames from ${video.fileName}`, async () => {
+      setFrameProgress({ percent: 0, current: 0, total: 0 });
       const result = await extractFrames(
         video.id,
         1 / frameSampleFps,
         withAi,
         withAi ? ["vehicle", "plate"] : ["vehicle"],
         vehicleModelKey,
-        plateModelKey
+        plateModelKey,
+        (job) => setFrameProgress({
+          percent: job.progress_percent ?? 0,
+          current: job.progress_current ?? 0,
+          total: job.progress_total ?? 0
+        })
       );
       await refreshDataset(datasetId);
       setAnnotationsByMedia({});
       setActiveTab("media");
       setStatus(result.message ?? "Frames extracted");
-    }).catch((error) => setStatus(error instanceof Error ? error.message : "Frame extraction failed"));
+      setFrameProgress(null);
+    }).catch((error) => {
+      setFrameProgress(null);
+      setStatus(error instanceof Error ? error.message : "Frame extraction failed");
+    });
   }
 
   async function handleAiSuggestion(item: MediaSample, task: "vehicle" | "plate") {
@@ -969,7 +980,12 @@ export default function App() {
       </header>
 
       <main className="home-layout">
-        {isProcessing ? <ProgressStrip label={processingLabel ?? "Processing"} /> : null}
+        {isProcessing ? (
+          <ProgressStrip
+            label={frameProgress ? `${processingLabel ?? "Extracting frames"} ${frameProgress.percent}%` : processingLabel ?? "Processing"}
+            percent={frameProgress?.percent}
+          />
+        ) : null}
         {bulkProgress ? <ProgressStrip label={`AI annotation ${bulkProgressPercent}% (${bulkProgress.done}/${bulkProgress.total})`} /> : null}
         <nav className="dashboard-tabs" aria-label="Dashboard sections">
           <NavLink to="/dashboard" className={({ isActive }) => (isActive || location.pathname === "/" ? "active" : "")}>
@@ -1270,8 +1286,8 @@ export default function App() {
             <div className="action-row">
               {openFolder ? (
                 <button onClick={() => setOpenFolder(null)}>
-                  <GalleryHorizontalEnd size={17} />
-                  All media
+                  <ArrowLeft size={17} />
+                  Back
                 </button>
               ) : null}
               {visibleFrames.length > 0 ? (
@@ -1306,7 +1322,7 @@ export default function App() {
                 }}
               />
             ) : null}
-            {openFolder ? (
+            {openFolder?.kind === "import" ? (
               <div className="folder-tools">
                 <label>
                   <span>Folder display name</span>
@@ -1367,17 +1383,38 @@ export default function App() {
                   ))
                 : null}
               {visibleVideos.map((item) => (
-                <div className="gallery-tile media-card" key={item.id}>
+                <div
+                  className="gallery-tile media-card video-folder-tile"
+                  key={item.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setOpenFolder({ kind: "video", id: item.id })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setOpenFolder({ kind: "video", id: item.id });
+                    }
+                  }}
+                >
                   <div className="video-thumb">
-                    <Film size={30} />
+                    <FolderOpen size={30} />
                   </div>
                   <span>{item.fileName}</span>
                   <FrameStatus count={frameCountForVideo(annotatableMedia, item.id)} />
                   <small>Analyze up to {frameSampleFps} fps with selected vehicle model</small>
                   <div className="card-actions">
-                    <button onClick={() => setOpenFolder({ kind: "video", id: item.id })}>Open folder</button>
-                    <button onClick={() => handleExtractFrames(item, false)} disabled={isProcessing}>Smart frames</button>
-                    <button onClick={() => handleExtractFrames(item, true)} disabled={isProcessing}>Smart frames + AI</button>
+                    <button onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenFolder({ kind: "video", id: item.id });
+                    }}>Open folder</button>
+                    <button onClick={(event) => {
+                      event.stopPropagation();
+                      handleExtractFrames(item, false);
+                    }} disabled={isProcessing}>Smart frames</button>
+                    <button onClick={(event) => {
+                      event.stopPropagation();
+                      handleExtractFrames(item, true);
+                    }} disabled={isProcessing}>Smart frames + AI</button>
                   </div>
                 </div>
               ))}
@@ -1608,10 +1645,14 @@ function DirectoryPickerDialog({
   );
 }
 
-function ProgressStrip({ label }: { label: string }) {
+function ProgressStrip({ label, percent }: { label: string; percent?: number }) {
+  const boundedPercent = typeof percent === "number" ? Math.min(100, Math.max(0, percent)) : null;
   return (
     <div className="progress-strip" role="status" aria-live="polite">
-      <div className="progress-bar" />
+      <div
+        className={boundedPercent === null ? "progress-bar" : "progress-bar determinate"}
+        style={boundedPercent === null ? undefined : { width: `${boundedPercent}%` }}
+      />
       <span>{label}</span>
     </div>
   );
