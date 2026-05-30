@@ -10,8 +10,11 @@ export default defineConfig({
       "/api": "http://127.0.0.1:8000",
       "/storage": "http://127.0.0.1:8000"
     },
-    // Allow the dev server to be reached at this hostname and set origin for HMR
-    host: "annotaion.sanjibkasti.com.np",
-    origin: "https://annotaion.sanjibkasti.com.np"
+    // Bind to all interfaces locally to avoid external DNS lookup
+    host: "0.0.0.0",
+    // Use localhost origin for HMR during local development. If you need the
+    // annotated domain, add it to your OS hosts file or a DNS entry and then
+    // set `origin` to that domain.
+    origin: "http://localhost:5173"
   }
 });
