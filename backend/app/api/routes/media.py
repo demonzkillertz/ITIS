@@ -1104,6 +1104,10 @@ def extract_video_frames(
     frame_number = 0
     saved_index = 0
     previous_detections: list[dict[str, float]] | None = None
+    inspected_frames = 0
+    frames_with_detections = 0
+    skipped_unchanged = 0
+    skipped_existing = 0
     existing_timestamps = {
         int((timestamp or 0) * 1000)
         for timestamp in db.scalars(
@@ -1146,11 +1150,17 @@ def extract_video_frames(
         batch_detections = detect_vehicle_boxes_batch(detector, batch_frames, payload.vehicle_model_key)
         for frame, sampled_frame_number, detections in zip(batch_frames, batch_numbers, batch_detections):
             processed_samples += 1
+            inspected_frames += 1
+            if detections:
+                frames_with_detections += 1
             if not should_save_video_frame(detections, previous_detections):
+                if detections:
+                    skipped_unchanged += 1
                 continue
             timestamp = sampled_frame_number / fps if fps else 0
             timestamp_ms = int(timestamp * 1000)
             if timestamp_ms in existing_timestamps:
+                skipped_existing += 1
                 continue
             frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
             frame_path = video_frame_root / frame_name
@@ -1180,6 +1190,18 @@ def extract_video_frames(
             progress_callback(processed_samples, total_samples)
 
     capture.release()
+    if report.imported_frames == 0:
+        report.issues.append(
+            ImportIssue(
+                path=str(video_path),
+                issue_type="no_smart_frames",
+                message=(
+                    f"No smart frames saved. Inspected {inspected_frames} sampled frames; "
+                    f"{frames_with_detections} had vehicle detections; "
+                    f"{skipped_unchanged} were unchanged; {skipped_existing} were already extracted."
+                ),
+            )
+        )
     return frames
 
 
@@ -1223,15 +1245,16 @@ def detect_vehicle_boxes_batch(detector, frames: list[object], model_key: str | 
             imgsz=YOLO_IMAGE_SIZE,
             batch=min(YOLO_BATCH_SIZE, len(frames)),
         )
-    except Exception:
-        return [[] for _ in frames]
+    except Exception as exc:
+        raise RuntimeError(f"Vehicle model inference failed: {exc}") from exc
 
     detections_by_frame: list[list[dict[str, float]]] = []
     for result in results:
         detections: list[dict[str, float]] = []
         image_height, image_width = result.orig_shape[:2]
         for box in result.boxes:
-            if map_model_class(AnnotationTask.VEHICLE, int(box.cls.item()), model_key) is None:
+            raw_class_id = int(box.cls.item())
+            if map_model_class(AnnotationTask.VEHICLE, raw_class_id, model_key) is None and is_base_model_key(model_key):
                 continue
             x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
             width = max(0.0, x2 - x1)
