@@ -1,14 +1,19 @@
-r"""Extract useful high-quality vehicle frames from a video using YOLOv9c.
+r"""Batch extract high-quality vehicle frames from videos with YOLOv9c.
+
+Default behavior:
+    Source videos:
+        C:\Users\user\Desktop\Intelligent Traffic Management System\frontend\public\video
+
+    Output:
+        C:\datasets\<video_name>\image
+        C:\datasets\<video_name>\label
 
 Example:
-    python ext.py --video C:\videos\traffic.mp4 --output C:\datasets\traffic_extract --fps 2
+    python ext.py
 
-Outputs:
-    output/
-      images/
-        video_frame_000001_0000000000ms.jpg
-      labels/
-        video_frame_000001_0000000000ms.txt
+Optional:
+    python ext.py --source-dir "C:\path\videos" --output-root "C:\datasets" --fps 15
+    python ext.py --video "C:\path\one_video.mp4" --output-root "C:\datasets"
 
 The label classes match the ITIS vehicle dataset:
     1 bike
@@ -26,6 +31,10 @@ from typing import Iterable
 
 import cv2
 
+
+DEFAULT_SOURCE_DIR = Path(r"C:\Users\user\Desktop\Intelligent Traffic Management System\frontend\public\video")
+DEFAULT_OUTPUT_ROOT = Path(r"C:\datasets")
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".m4v", ".webm"}
 
 COCO_TO_ITIS_VEHICLE = {
     1: 1,  # bicycle -> bike
@@ -46,19 +55,28 @@ class VehicleBox:
     height: float
 
 
+@dataclass
+class ExtractStats:
+    video: Path
+    inspected: int = 0
+    saved: int = 0
+    skipped_empty: int = 0
+    skipped_duplicate: int = 0
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Extract non-duplicate vehicle frames from a video.")
-    parser.add_argument("--video", type=Path, required=True, help="Input video path")
-    parser.add_argument("--output", type=Path, required=True, help="Output folder")
+    parser = argparse.ArgumentParser(description="Extract non-duplicate vehicle frames from one video or a folder.")
+    parser.add_argument("--video", type=Path, default=None, help="Optional single video path")
+    parser.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR, help="Folder containing source videos")
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT, help="Root output folder")
     parser.add_argument("--model", default="yolov9c.pt", help="YOLO model path/name. Default downloads/uses YOLOv9 compact.")
-    parser.add_argument("--fps", type=float, default=2.0, help="How many frames per second to analyze")
+    parser.add_argument("--fps", type=float, default=15.0, help="How many frames per second to analyze")
     parser.add_argument("--conf", type=float, default=0.35, help="YOLO confidence threshold")
     parser.add_argument("--imgsz", type=int, default=960, help="YOLO inference image size")
     parser.add_argument("--batch", type=int, default=16, help="YOLO batch size")
     parser.add_argument("--quality", type=int, default=95, help="JPEG quality, 1-100")
-    parser.add_argument("--duplicate-iou", type=float, default=0.72, help="IoU threshold used for duplicate vehicle layouts")
+    parser.add_argument("--duplicate-iou", type=float, default=0.72, help="IoU threshold for duplicate vehicle layouts")
     parser.add_argument("--history", type=int, default=3, help="Compare against this many recently saved frames")
-    parser.add_argument("--keep-empty", action="store_true", help="Save frames even when no vehicles are detected")
     parser.add_argument("--device", default=None, help="YOLO device, e.g. cuda:0 or cpu. Auto-selects CUDA when available.")
     return parser.parse_args()
 
@@ -84,6 +102,25 @@ def load_model(model_name: str):
 def safe_name(value: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in "._-" else "_" for char in value).strip("._")
     return cleaned or "video"
+
+
+def find_videos(args: argparse.Namespace) -> list[Path]:
+    if args.video is not None:
+        if not args.video.exists():
+            raise FileNotFoundError(f"Video not found: {args.video}")
+        return [args.video]
+
+    if not args.source_dir.exists():
+        raise FileNotFoundError(f"Source video folder not found: {args.source_dir}")
+
+    videos = sorted(
+        path
+        for path in args.source_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in VIDEO_EXTENSIONS
+    )
+    if not videos:
+        raise FileNotFoundError(f"No video files found in: {args.source_dir}")
+    return videos
 
 
 def box_to_corners(box: VehicleBox) -> tuple[float, float, float, float]:
@@ -112,9 +149,6 @@ def is_duplicate_layout(
     previous_layouts: Iterable[list[VehicleBox]],
     duplicate_iou: float,
 ) -> bool:
-    if not detections:
-        return False
-
     current = sorted(detections, key=lambda box: (box.class_id, box.x_center, box.y_center))
     for previous in previous_layouts:
         if len(current) != len(previous):
@@ -179,8 +213,8 @@ def write_labels(path: Path, detections: list[VehicleBox]) -> None:
 
 def save_frame(
     frame,
-    images_dir: Path,
-    labels_dir: Path,
+    image_dir: Path,
+    label_dir: Path,
     base: str,
     saved_count: int,
     timestamp_ms: int,
@@ -188,44 +222,34 @@ def save_frame(
     quality: int,
 ) -> None:
     stem = f"{base}_frame_{saved_count:06d}_{timestamp_ms:010d}ms"
-    image_path = images_dir / f"{stem}.jpg"
-    label_path = labels_dir / f"{stem}.txt"
+    image_path = image_dir / f"{stem}.jpg"
+    label_path = label_dir / f"{stem}.txt"
     cv2.imwrite(str(image_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), max(1, min(100, quality))])
     write_labels(label_path, detections)
 
 
-def main() -> None:
-    args = parse_args()
-    if not args.video.exists():
-        raise FileNotFoundError(f"Video not found: {args.video}")
+def extract_video(video_path: Path, args: argparse.Namespace, model, device: str | None) -> ExtractStats:
+    video_name = safe_name(video_path.stem)
+    output_dir = args.output_root / video_name
+    image_dir = output_dir / "image"
+    label_dir = output_dir / "label"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    label_dir.mkdir(parents=True, exist_ok=True)
 
-    images_dir = args.output / "images"
-    labels_dir = args.output / "labels"
-    images_dir.mkdir(parents=True, exist_ok=True)
-    labels_dir.mkdir(parents=True, exist_ok=True)
-
-    model = load_model(args.model)
-    device = args.device or default_device()
-
-    capture = cv2.VideoCapture(str(args.video))
+    stats = ExtractStats(video=video_path)
+    capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():
-        raise RuntimeError(f"Could not open video: {args.video}")
+        raise RuntimeError(f"Could not open video: {video_path}")
 
     source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 25)
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     step = max(1, int(round(source_fps / max(args.fps, 0.001))))
-    base = safe_name(args.video.stem)
-
     frame_number = 0
-    inspected_count = 0
-    saved_count = 0
-    skipped_empty = 0
-    skipped_duplicate = 0
     recent_layouts: list[list[VehicleBox]] = []
     pending: list[tuple[int, object]] = []
 
     def flush_pending() -> None:
-        nonlocal saved_count, skipped_empty, skipped_duplicate, recent_layouts
+        nonlocal recent_layouts
         if not pending:
             return
 
@@ -242,19 +266,18 @@ def main() -> None:
 
         for (sampled_frame_number, frame), result in zip(pending, results):
             detections = detections_from_result(result)
-            if not detections and not args.keep_empty:
-                skipped_empty += 1
+            if not detections:
+                stats.skipped_empty += 1
                 continue
             if is_duplicate_layout(detections, reversed(recent_layouts), args.duplicate_iou):
-                skipped_duplicate += 1
+                stats.skipped_duplicate += 1
                 continue
 
             timestamp_ms = int((sampled_frame_number / source_fps) * 1000) if source_fps else 0
-            saved_count += 1
-            save_frame(frame, images_dir, labels_dir, base, saved_count, timestamp_ms, detections, args.quality)
-            if detections:
-                recent_layouts.append(detections)
-                recent_layouts = recent_layouts[-max(1, args.history) :]
+            stats.saved += 1
+            save_frame(frame, image_dir, label_dir, video_name, stats.saved, timestamp_ms, detections, args.quality)
+            recent_layouts.append(detections)
+            recent_layouts = recent_layouts[-max(1, args.history) :]
 
         pending.clear()
 
@@ -265,7 +288,7 @@ def main() -> None:
                 break
 
             pending.append((frame_number, frame))
-            inspected_count += 1
+            stats.inspected += 1
             frame_number += 1
 
             skipped = 0
@@ -282,15 +305,42 @@ def main() -> None:
     finally:
         capture.release()
 
-    print(f"Device: {device or 'cpu'}")
+    print(f"Video: {video_path.name}")
+    print(f"Output: {output_dir}")
     print(f"Source FPS: {source_fps:.2f}")
     print(f"Analysis FPS: {args.fps}")
-    print(f"Inspected frames: {inspected_count}")
-    print(f"Saved frames: {saved_count}")
-    print(f"Skipped empty: {skipped_empty}")
-    print(f"Skipped duplicate vehicle layouts: {skipped_duplicate}")
-    print(f"Images: {images_dir}")
-    print(f"Labels: {labels_dir}")
+    print(f"Inspected frames: {stats.inspected}")
+    print(f"Saved frames: {stats.saved}")
+    print(f"Skipped no vehicle: {stats.skipped_empty}")
+    print(f"Skipped duplicate vehicle layouts: {stats.skipped_duplicate}")
+    print("")
+    return stats
+
+
+def main() -> None:
+    args = parse_args()
+    videos = find_videos(args)
+    model = load_model(args.model)
+    device = args.device or default_device()
+
+    print(f"Device: {device or 'cpu'}")
+    print(f"Videos found: {len(videos)}")
+    print(f"Output root: {args.output_root}")
+    print("")
+
+    totals = ExtractStats(video=Path("all"))
+    for video_path in videos:
+        stats = extract_video(video_path, args, model, device)
+        totals.inspected += stats.inspected
+        totals.saved += stats.saved
+        totals.skipped_empty += stats.skipped_empty
+        totals.skipped_duplicate += stats.skipped_duplicate
+
+    print("Done")
+    print(f"Total inspected frames: {totals.inspected}")
+    print(f"Total saved frames: {totals.saved}")
+    print(f"Total skipped no vehicle: {totals.skipped_empty}")
+    print(f"Total skipped duplicates: {totals.skipped_duplicate}")
 
 
 if __name__ == "__main__":
