@@ -608,10 +608,11 @@ def extract_frames_for_video_sync(
         import_session.issue_count = (import_session.issue_count or 0) + len(report.issues)
     db.commit()
 
+    message = frame_extraction_message(report)
     return ProcessingJobRead(
         kind="frame_extraction",
         status=JobStatus.COMPLETED,
-        message=f"Extracted {report.imported_frames} frames and created {report.model_annotations} AI boxes",
+        message=message,
         progress_percent=100,
     )
 
@@ -1064,6 +1065,14 @@ def update_frame_progress(job_id: UUID | None, current: int, total: int) -> None
         progress_percent=round((bounded_current / bounded_total) * 100),
         message=f"Extracting frames {round((bounded_current / bounded_total) * 100)}%",
     )
+
+
+def frame_extraction_message(report: ServerFolderImportRead) -> str:
+    if report.imported_frames > 0:
+        return f"Extracted {report.imported_frames} frames and created {report.model_annotations} AI boxes"
+    if report.issues:
+        return report.issues[-1].message
+    return "No new smart frames found. The vehicle model did not detect a changed vehicle frame, or those timestamps were already extracted."
 
 
 def extract_video_frames(
