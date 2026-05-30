@@ -1128,14 +1128,18 @@ def extract_video_frames(
         for _ in range(YOLO_BATCH_SIZE):
             if total_frames > 0 and frame_number >= total_frames:
                 break
-            if step > 1:
-                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
             ok, frame = capture.read()
             if not ok:
                 break
             batch_frames.append(frame)
             batch_numbers.append(frame_number)
-            frame_number += step
+            frame_number += 1
+            skipped = 0
+            while skipped < step - 1 and (total_frames <= 0 or frame_number < total_frames):
+                if not capture.grab():
+                    break
+                frame_number += 1
+                skipped += 1
         if not batch_frames:
             break
 

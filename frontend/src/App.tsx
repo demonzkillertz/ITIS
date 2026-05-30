@@ -86,7 +86,7 @@ export default function App() {
   const [labelDir, setLabelDir] = useState("");
   const [importMode, setImportMode] = useState<"auto" | "explicit">("auto");
   const [duplicatePolicy, setDuplicatePolicy] = useState<"skip" | "import_copy">("skip");
-  const [frameSampleFps, setFrameSampleFps] = useState(30);
+  const [frameSampleFps, setFrameSampleFps] = useState(2);
   const [vehicleModelKey, setVehicleModelKey] = useState("custom_vehicle");
   const [plateModelKey, setPlateModelKey] = useState("custom_plate");
   const [selectedMediaIds, setSelectedMediaIds] = useState<Set<string>>(new Set());
