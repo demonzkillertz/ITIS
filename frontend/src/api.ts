@@ -132,6 +132,13 @@ type ApiModelCatalog = {
   models: ApiModelOption[];
 };
 
+export type DirectoryEntry = {
+  path: string;
+  name: string;
+  parent?: string | null;
+  directories: string[];
+};
+
 export type ImportHistoryItem = {
   id: string;
   imageDir: string;
@@ -179,6 +186,15 @@ export async function listMedia(datasetId: string): Promise<MediaSample[]> {
     importSessionId: item.import_session_id ?? undefined,
     parentMediaId: item.parent_media_id ?? undefined
   }));
+}
+
+export async function browseDirectories(path?: string | null): Promise<DirectoryEntry> {
+  const params = new URLSearchParams();
+  if (path) {
+    params.set("path", path);
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return request<DirectoryEntry>(`/api/media/directories${suffix}`);
 }
 
 export async function uploadImages(datasetId: string, files: FileList): Promise<MediaSample[]> {

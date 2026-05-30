@@ -264,6 +264,20 @@ h2 {
   font-size: 0.82rem;
 }
 
+.import-grid label button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: fit-content;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #e5eef7;
+  background: #182233;
+}
+
 .import-grid input,
 .import-grid select {
   min-width: 0;
@@ -570,12 +584,14 @@ h2 {
 }
 
 .annotation-select span {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.annotation-verify,
 .annotation-delete {
   display: grid;
   place-items: center;
@@ -584,9 +600,19 @@ h2 {
   flex: 0 0 auto;
   border: 0;
   border-left: 1px solid #2f3f54;
+  color: #a7f3d0;
+  background: transparent;
+}
+
+.annotation-delete {
   border-radius: 0 6px 6px 0;
   color: #fca5a5;
   background: transparent;
+}
+
+.annotation-verify:hover {
+  color: #ecfeff;
+  background: #14532d;
 }
 
 .annotation-delete:hover {
@@ -612,6 +638,9 @@ h2 {
 }
 
 .annotation-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: #a7f3d0;
   white-space: nowrap;
 }
@@ -769,12 +798,120 @@ h2 {
 }
 
 .card-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 30px;
   padding: 0 8px;
   border: 1px solid #314158;
   border-radius: 6px;
   color: #e5eef7;
   background: #0d141f;
+}
+
+.ai-menu {
+  display: grid;
+  gap: 9px;
+  max-width: 440px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #2f3f54;
+  border-radius: 6px;
+  background: #101a28;
+}
+
+.gallery-tile .ai-menu {
+  max-width: none;
+  margin-top: 4px;
+}
+
+.ai-menu button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid #38bdf8;
+  border-radius: 6px;
+  color: #e0f2fe;
+  background: #075985;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(7, 11, 17, 0.72);
+}
+
+.directory-dialog {
+  display: grid;
+  gap: 10px;
+  width: min(720px, 100%);
+  max-height: min(720px, 90vh);
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid #314158;
+  border-radius: 8px;
+  background: #121b2a;
+}
+
+.dialog-title,
+.directory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.dialog-title button,
+.directory-actions button,
+.directory-list button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #314158;
+  border-radius: 6px;
+  color: #e5eef7;
+  background: #182233;
+}
+
+.directory-actions button:last-child {
+  border-color: #38bdf8;
+  color: #e0f2fe;
+  background: #075985;
+}
+
+.directory-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9fb2c8;
+}
+
+.directory-list {
+  display: grid;
+  gap: 6px;
+  min-height: 180px;
+  overflow: auto;
+}
+
+.directory-list button {
+  justify-content: flex-start;
+}
+
+.directory-list span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-actions button:hover {

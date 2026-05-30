@@ -1,4 +1,4 @@
-import { CircleDot, ListChecks, Trash2 } from "lucide-react";
+import { Check, CircleDot, ListChecks, Trash2 } from "lucide-react";
 
 import type { Annotation, AnnotationClass } from "../types";
 
@@ -9,6 +9,7 @@ type SidebarProps = {
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string) => void;
+  onAcceptAnnotation: (id: string) => void;
   onDeleteAnnotation: (id: string) => void;
 };
 
@@ -19,6 +20,7 @@ export default function Sidebar({
   annotations,
   selectedAnnotationId,
   onSelectAnnotation,
+  onAcceptAnnotation,
   onDeleteAnnotation
 }: SidebarProps) {
   return (
@@ -57,10 +59,18 @@ export default function Sidebar({
             }
           >
             <button className="annotation-select" onClick={() => onSelectAnnotation(annotation.id)}>
-              <span>{annotation.className}</span>
+              <span title={annotation.className}>{annotation.className}</span>
               <small>
                 {annotation.isPrefetched ? "prefetch" : annotation.source} / {annotation.status}
               </small>
+            </button>
+            <button
+              className="annotation-verify"
+              title={`Verify ${annotation.className}`}
+              onClick={() => onAcceptAnnotation(annotation.id)}
+              disabled={annotation.status === "accepted" && Boolean(annotation.verifiedAt)}
+            >
+              <Check size={15} />
             </button>
             <button
               className="annotation-delete"

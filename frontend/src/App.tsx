@@ -5,10 +5,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Film,
+  FolderOpen,
   FolderSearch,
   GalleryHorizontalEnd,
   ImagePlus,
   ListChecks,
+  MoreHorizontal,
   Save,
   Square,
   SquareCheck,
@@ -16,10 +18,12 @@ import {
   Wand2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import {
   autoAnnotateMedia,
+  browseDirectories,
   deleteMedia,
   downloadModels,
   ensureDataset,
@@ -36,8 +40,8 @@ import {
 import AnnotationCanvas from "./components/AnnotationCanvas";
 import Sidebar from "./components/Sidebar";
 import { classes } from "./data/sample";
-import type { ImportHistoryItem, ModelOption } from "./api";
-import type { Annotation, AnnotationClass, MediaSample } from "./types";
+import type { DirectoryEntry, ImportHistoryItem, ModelOption } from "./api";
+import type { Annotation, AnnotationClass, AnnotationTask, MediaSample } from "./types";
 
 type ScanResult = {
   image_count: number;
@@ -85,6 +89,12 @@ export default function App() {
     }
   });
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [aiMenuKey, setAiMenuKey] = useState<string | null>(null);
+  const [bulkTasks, setBulkTasks] = useState<Record<AnnotationTask, boolean>>({ vehicle: true, plate: true });
+  const [directoryPicker, setDirectoryPicker] = useState<{
+    target: "parent" | "images" | "videos" | "labels";
+    entry: DirectoryEntry | null;
+  } | null>(null);
 
   const activeTab = tabFromPath(location.pathname);
   const setActiveTab = (tab: "dashboard" | "images" | "videos" | "media" | "history") => {
@@ -388,30 +398,67 @@ export default function App() {
     }).catch((error) => setStatus(error instanceof Error ? error.message : "AI suggestion failed"));
   }
 
+  async function handleAiTasks(item: MediaSample, tasks: AnnotationTask[]) {
+    if (tasks.length === 0) {
+      setStatus("Choose vehicle, plate, or both");
+      return;
+    }
+    await runWithProgress(`Creating AI suggestions for ${item.fileName}`, async () => {
+      let result: { message?: string } = {};
+      for (const task of tasks) {
+        result = await autoAnnotateMedia(
+          item.id,
+          task,
+          task === "vehicle" ? vehicleModelKey : plateModelKey
+        );
+      }
+      const updated = await listAnnotations(item.id);
+      setAnnotationsByMedia((current) => ({ ...current, [item.id]: updated }));
+      setStatus(result.message ?? "AI suggestions created");
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "AI suggestion failed"));
+  }
+
   async function handleBulkAiBoth() {
     const targets = selectedMediaIds.size
       ? annotatableMedia.filter((item) => selectedMediaIds.has(item.id))
       : visibleFrames.length
         ? visibleFrames
         : annotatableMedia;
-    await handleBulkAiBothFor(targets);
+    await handleBulkAiForTasks(targets, selectedBulkTasks());
   }
 
   async function handleBulkAiBothFor(targets: MediaSample[]) {
+    await handleBulkAiForTasks(targets, ["vehicle", "plate"]);
+  }
+
+  async function handleBulkAiForTasks(targets: MediaSample[], tasks: AnnotationTask[]) {
     if (targets.length === 0) {
       return;
     }
-    await runWithProgress("Creating vehicle and plate suggestions", async () => {
+    if (tasks.length === 0) {
+      setStatus("Choose vehicle, plate, or both");
+      return;
+    }
+    await runWithProgress("Creating AI suggestions", async () => {
       setBulkProgress({ done: 0, total: targets.length });
       for (const [index, item] of targets.entries()) {
-        await autoAnnotateMedia(item.id, "vehicle", vehicleModelKey);
-        await autoAnnotateMedia(item.id, "plate", plateModelKey);
+        for (const task of tasks) {
+          await autoAnnotateMedia(
+            item.id,
+            task,
+            task === "vehicle" ? vehicleModelKey : plateModelKey
+          );
+        }
         setBulkProgress({ done: index + 1, total: targets.length });
       }
       setAnnotationsByMedia({});
       setStatus(`AI suggestions created for ${targets.length} image${targets.length === 1 ? "" : "s"}`);
       setBulkProgress(null);
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Bulk AI suggestion failed"));
+  }
+
+  function selectedBulkTasks(): AnnotationTask[] {
+    return (["vehicle", "plate"] as AnnotationTask[]).filter((task) => bulkTasks[task]);
   }
 
   function toggleMediaSelection(mediaId: string) {
@@ -535,6 +582,62 @@ export default function App() {
           : annotation
       )
     );
+  }
+
+  function acceptAnnotation(annotationId: string) {
+    replaceAnnotations(
+      annotations.map((annotation) =>
+        annotation.id === annotationId
+          ? {
+              ...annotation,
+              status: "accepted",
+              reviewedByUser: "local_user",
+              verifiedAt: new Date().toISOString()
+            }
+          : annotation
+      )
+    );
+  }
+
+  async function openDirectoryPicker(target: "parent" | "images" | "videos" | "labels") {
+    const currentPath =
+      target === "parent" ? parentDir : target === "images" ? imageDir : target === "videos" ? videoDir : labelDir;
+    setDirectoryPicker({ target, entry: null });
+    try {
+      const entry = await browseDirectories(currentPath || parentDir || null);
+      setDirectoryPicker({ target, entry });
+    } catch (error) {
+      setDirectoryPicker(null);
+      setStatus(error instanceof Error ? error.message : "Could not browse directory");
+    }
+  }
+
+  async function browseTo(path: string) {
+    if (!directoryPicker) {
+      return;
+    }
+    try {
+      const entry = await browseDirectories(path);
+      setDirectoryPicker({ ...directoryPicker, entry });
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not browse directory");
+    }
+  }
+
+  function chooseDirectory(path: string) {
+    if (!directoryPicker) {
+      return;
+    }
+    if (directoryPicker.target === "parent") {
+      setParentDir(path);
+    } else if (directoryPicker.target === "images") {
+      setImageDir(path);
+    } else if (directoryPicker.target === "videos") {
+      setVideoDir(path);
+    } else {
+      setLabelDir(path);
+    }
+    setDirectoryPicker(null);
   }
 
   function relabelSelected(classKey: string) {
@@ -669,6 +772,7 @@ export default function App() {
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={setSelectedAnnotationId}
+            onAcceptAnnotation={acceptAnnotation}
             onDeleteAnnotation={deleteAnnotation}
           />
           <section className="annotation-stage">
@@ -910,6 +1014,10 @@ export default function App() {
                   onChange={(event) => setParentDir(event.target.value)}
                   placeholder="C:\\datasets\\traffic"
                 />
+                <button type="button" onClick={() => openDirectoryPicker("parent")}>
+                  <FolderOpen size={15} />
+                  Browse
+                </button>
               </label>
               {activeTab === "images" ? (
                 <>
@@ -920,6 +1028,10 @@ export default function App() {
                       onChange={(event) => setImageDir(event.target.value)}
                       placeholder="C:\\datasets\\traffic\\images"
                     />
+                    <button type="button" onClick={() => openDirectoryPicker("images")}>
+                      <FolderOpen size={15} />
+                      Browse
+                    </button>
                   </label>
                   <label>
                     <span>Labels</span>
@@ -928,6 +1040,10 @@ export default function App() {
                       onChange={(event) => setLabelDir(event.target.value)}
                       placeholder="C:\\datasets\\traffic\\labels"
                     />
+                    <button type="button" onClick={() => openDirectoryPicker("labels")}>
+                      <FolderOpen size={15} />
+                      Browse
+                    </button>
                   </label>
                 </>
               ) : null}
@@ -1007,6 +1123,10 @@ export default function App() {
                   onChange={(event) => setParentDir(event.target.value)}
                   placeholder="C:\\datasets\\traffic"
                 />
+                <button type="button" onClick={() => openDirectoryPicker("parent")}>
+                  <FolderOpen size={15} />
+                  Browse
+                </button>
               </label>
               <label>
                 <span>Videos</span>
@@ -1015,6 +1135,10 @@ export default function App() {
                   onChange={(event) => setVideoDir(event.target.value)}
                   placeholder="C:\\datasets\\traffic\\videos"
                 />
+                <button type="button" onClick={() => openDirectoryPicker("videos")}>
+                  <FolderOpen size={15} />
+                  Browse
+                </button>
               </label>
               <label>
                 <span>Analysis FPS</span>
@@ -1087,9 +1211,9 @@ export default function App() {
                   {selectedVisibleCount === visibleFrames.length ? "Clear visible" : "Select visible"}
                 </button>
               ) : null}
-              <button onClick={handleBulkAiBoth} disabled={isProcessing || annotatableMedia.length === 0}>
-                <Wand2 size={17} />
-                {selectedMediaIds.size ? `AI both selected (${selectedMediaIds.size})` : "AI both all"}
+              <button onClick={() => setAiMenuKey(aiMenuKey === "bulk" ? null : "bulk")} disabled={isProcessing || annotatableMedia.length === 0}>
+                <MoreHorizontal size={17} />
+                {selectedMediaIds.size ? `AI selected (${selectedMediaIds.size})` : "AI annotate"}
               </button>
               {selectedMediaIds.size ? (
                 <button
@@ -1101,6 +1225,18 @@ export default function App() {
                 </button>
               ) : null}
             </div>
+            {aiMenuKey === "bulk" ? (
+              <AiAnnotationMenu
+                vehicleModel={modelSelect("vehicle", true)}
+                plateModel={modelSelect("plate", true)}
+                tasks={bulkTasks}
+                onToggleTask={(task) => setBulkTasks((current) => ({ ...current, [task]: !current[task] }))}
+                onRun={() => {
+                  setAiMenuKey(null);
+                  handleBulkAiBoth();
+                }}
+              />
+            ) : null}
             {openFolder ? (
               <div className="folder-tools">
                 <label>
@@ -1135,12 +1271,25 @@ export default function App() {
                           Select images
                         </button>
                         <button
-                          onClick={() => handleBulkAiBothFor(folder.media.filter((item) => item.mediaType === "image"))}
+                          onClick={() => setAiMenuKey(aiMenuKey === folder.key ? null : folder.key)}
                           disabled={isProcessing || folder.images === 0}
                         >
-                          AI folder
+                          <MoreHorizontal size={15} />
+                          AI annotations
                         </button>
                       </div>
+                      {aiMenuKey === folder.key ? (
+                        <AiAnnotationMenu
+                          vehicleModel={modelSelect("vehicle", true)}
+                          plateModel={modelSelect("plate", true)}
+                          tasks={bulkTasks}
+                          onToggleTask={(task) => setBulkTasks((current) => ({ ...current, [task]: !current[task] }))}
+                          onRun={() => {
+                            setAiMenuKey(null);
+                            handleBulkAiForTasks(folder.media.filter((item) => item.mediaType === "image"), selectedBulkTasks());
+                          }}
+                        />
+                      ) : null}
                     </div>
                   ))
                 : null}
@@ -1169,11 +1318,26 @@ export default function App() {
                   {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
                   <div className="card-actions">
                     <button onClick={() => openMedia(annotatableMedia.findIndex((mediaItem) => mediaItem.id === item.id))}>Annotate</button>
-                    <button onClick={() => handleAiBoth(item)} disabled={isProcessing}>AI both</button>
+                    <button onClick={() => setAiMenuKey(aiMenuKey === item.id ? null : item.id)} disabled={isProcessing}>
+                      <MoreHorizontal size={15} />
+                      AI
+                    </button>
                     <button onClick={() => handleAiSuggestion(item, "vehicle")} disabled={isProcessing}>Vehicle</button>
                     <button onClick={() => handleAiSuggestion(item, "plate")} disabled={isProcessing}>Plate</button>
                     <button onClick={() => handleDeleteMediaItems([item])} disabled={isProcessing}>Delete</button>
                   </div>
+                  {aiMenuKey === item.id ? (
+                    <AiAnnotationMenu
+                      vehicleModel={modelSelect("vehicle", true)}
+                      plateModel={modelSelect("plate", true)}
+                      tasks={bulkTasks}
+                      onToggleTask={(task) => setBulkTasks((current) => ({ ...current, [task]: !current[task] }))}
+                      onRun={() => {
+                        setAiMenuKey(null);
+                        handleAiTasks(item, selectedBulkTasks());
+                      }}
+                    />
+                  ) : null}
                 </div>
               ))}
               {annotatableMedia.length === 0 && videos.length === 0 ? (
@@ -1206,7 +1370,103 @@ export default function App() {
           </section>
           } />
         </Routes>
+        {directoryPicker ? (
+          <DirectoryPickerDialog
+            target={directoryPicker.target}
+            entry={directoryPicker.entry}
+            onBrowse={browseTo}
+            onChoose={chooseDirectory}
+            onClose={() => setDirectoryPicker(null)}
+          />
+        ) : null}
       </main>
+    </div>
+  );
+}
+
+function AiAnnotationMenu({
+  vehicleModel,
+  plateModel,
+  tasks,
+  onToggleTask,
+  onRun
+}: {
+  vehicleModel: ReactNode;
+  plateModel: ReactNode;
+  tasks: Record<AnnotationTask, boolean>;
+  onToggleTask: (task: AnnotationTask) => void;
+  onRun: () => void;
+}) {
+  const hasTask = tasks.vehicle || tasks.plate;
+  return (
+    <div className="ai-menu">
+      <div className="toggle-grid">
+        <label>
+          <input type="checkbox" checked={tasks.vehicle} onChange={() => onToggleTask("vehicle")} />
+          Vehicle
+        </label>
+        <label>
+          <input type="checkbox" checked={tasks.plate} onChange={() => onToggleTask("plate")} />
+          Plate
+        </label>
+      </div>
+      {tasks.vehicle ? vehicleModel : null}
+      {tasks.plate ? plateModel : null}
+      <button onClick={onRun} disabled={!hasTask}>
+        <Wand2 size={16} />
+        Add AI annotations
+      </button>
+    </div>
+  );
+}
+
+function DirectoryPickerDialog({
+  target,
+  entry,
+  onBrowse,
+  onChoose,
+  onClose
+}: {
+  target: "parent" | "images" | "videos" | "labels";
+  entry: DirectoryEntry | null;
+  onBrowse: (path: string) => void;
+  onChoose: (path: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="dialog-backdrop" role="dialog" aria-modal="true">
+      <div className="directory-dialog">
+        <div className="dialog-title">
+          <h2>Select {target} folder</h2>
+          <button onClick={onClose}>Close</button>
+        </div>
+        {entry ? (
+          <>
+            <div className="directory-path">{entry.path}</div>
+            <div className="directory-actions">
+              {entry.parent ? <button onClick={() => onBrowse(entry.parent!)}>Up</button> : null}
+              <button onClick={() => onChoose(entry.path)}>
+                <Check size={16} />
+                Use this folder
+              </button>
+            </div>
+            <div className="directory-list">
+              {entry.directories.map((name) => {
+                const path = `${entry.path.replace(/[\\/]+$/, "")}\\${name}`;
+                return (
+                  <button key={path} onClick={() => onBrowse(path)}>
+                    <FolderOpen size={16} />
+                    <span>{name}</span>
+                  </button>
+                );
+              })}
+              {entry.directories.length === 0 ? <p className="empty-state">No child folders</p> : null}
+            </div>
+          </>
+        ) : (
+          <ProgressStrip label="Loading folders" />
+        )}
+      </div>
     </div>
   );
 }

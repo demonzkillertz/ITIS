@@ -164,6 +164,13 @@ class ServerFolderScanRead(BaseModel):
     issues: list[ImportIssue] = Field(default_factory=list)
 
 
+class DirectoryEntryRead(BaseModel):
+    path: str
+    name: str
+    parent: str | None = None
+    directories: list[str] = Field(default_factory=list)
+
+
 class FrameExtractionCreate(BaseModel):
     sample_every_seconds: float = Field(default=1.0, gt=0)
     auto_annotate: bool = False

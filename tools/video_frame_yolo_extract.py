@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import re
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 
 import cv2
@@ -35,6 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--conf", type=float, default=None, help="YOLO confidence threshold")
     parser.add_argument("--imgsz", type=int, default=None, help="YOLO inference image size")
     parser.add_argument("--device", default=None, help="YOLO device, for example cuda:0 or cpu")
+    parser.add_argument("--batch", type=int, default=None, help="YOLO batch size for sampled frames")
     parser.add_argument("--base-coco", action="store_true", default=None, help="Map COCO vehicle classes to ITIS vehicle classes")
     parser.add_argument("--keep-empty", action="store_true", default=None, help="Keep frames even when no labels are detected")
     parser.add_argument("--min-change", type=float, default=None, help="Mean pixel diff needed to keep a near-duplicate frame")
@@ -53,6 +55,7 @@ def merge_config(args: argparse.Namespace) -> argparse.Namespace:
         "conf": 0.25,
         "imgsz": 640,
         "device": None,
+        "batch": 16,
         "base_coco": False,
         "keep_empty": False,
         "min_change": 6.0,
@@ -121,21 +124,45 @@ def frame_changed(previous_gray, frame, min_change: float) -> tuple[bool, object
     return float(diff.mean()) >= min_change, gray
 
 
+def default_device() -> str | None:
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+            return "cuda:0"
+    except Exception:
+        return None
+    return None
+
+
+@lru_cache(maxsize=4)
+def load_model_cached(model_path: str):
+    from ultralytics import YOLO
+
+    model = YOLO(model_path)
+    device = default_device()
+    if device:
+        try:
+            model.to(device)
+        except Exception:
+            pass
+    return model
+
+
 def load_model(model_path: Path | None):
     if model_path is None:
         return None
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
-    from ultralytics import YOLO
-
-    return YOLO(str(model_path))
+    return load_model_cached(str(model_path))
 
 
 def predict_labels(model, frame, task: str, base_coco: bool, conf: float, imgsz: int, device: str | None) -> list[str]:
     if model is None:
         return []
 
-    results = model.predict(frame, conf=conf, imgsz=imgsz, device=device, verbose=False)
+    results = model.predict(frame, conf=conf, imgsz=imgsz, device=device or default_device(), half=bool(device or default_device()), verbose=False)
     rows: list[str] = []
     for result in results:
         image_height, image_width = result.orig_shape[:2]
@@ -154,6 +181,43 @@ def predict_labels(model, frame, task: str, base_coco: bool, conf: float, imgsz:
                 f"{class_id} {x_center:.6f} {y_center:.6f} "
                 f"{width / float(image_width):.6f} {height / float(image_height):.6f}"
             )
+    return rows
+
+
+def predict_label_batches(model, frames, task: str, base_coco: bool, conf: float, imgsz: int, device: str | None) -> list[list[str]]:
+    if model is None:
+        return [[] for _frame in frames]
+    actual_device = device or default_device()
+    results = model.predict(
+        frames,
+        conf=conf,
+        imgsz=imgsz,
+        device=actual_device,
+        half=actual_device is not None,
+        batch=max(1, len(frames)),
+        verbose=False,
+    )
+    return [labels_from_result(result, task, base_coco) for result in results]
+
+
+def labels_from_result(result, task: str, base_coco: bool) -> list[str]:
+    rows: list[str] = []
+    image_height, image_width = result.orig_shape[:2]
+    for box in result.boxes:
+        class_id = map_class(int(box.cls.item()), task, base_coco)
+        if class_id is None:
+            continue
+        x1, y1, x2, y2 = [float(value) for value in box.xyxy[0].tolist()]
+        width = max(0.0, x2 - x1)
+        height = max(0.0, y2 - y1)
+        if width <= 0 or height <= 0:
+            continue
+        x_center = (x1 + width / 2) / float(image_width)
+        y_center = (y1 + height / 2) / float(image_height)
+        rows.append(
+            f"{class_id} {x_center:.6f} {y_center:.6f} "
+            f"{width / float(image_width):.6f} {height / float(image_height):.6f}"
+        )
     return rows
 
 
@@ -182,47 +246,58 @@ def main() -> None:
     skipped_empty = 0
     skipped_duplicate = 0
     previous_gray = None
+    pending: list[tuple[int, object, object]] = []
 
-    try:
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if frame_number % step != 0:
-                frame_number += 1
-                continue
-
-            changed, next_gray = frame_changed(previous_gray, frame, args.min_change)
-            if not changed:
-                skipped_duplicate += 1
-                frame_number += 1
-                continue
-
-            labels = predict_labels(
-                model=model,
-                frame=frame,
-                task=args.task,
-                base_coco=args.base_coco,
-                conf=args.conf,
-                imgsz=args.imgsz,
-                device=args.device,
-            )
+    def save_pending() -> None:
+        nonlocal saved_count, skipped_empty, previous_gray
+        if not pending:
+            return
+        frames = [item[1] for item in pending]
+        label_batches = predict_label_batches(
+            model=model,
+            frames=frames,
+            task=args.task,
+            base_coco=args.base_coco,
+            conf=args.conf,
+            imgsz=args.imgsz,
+            device=args.device,
+        )
+        for (pending_frame_number, pending_frame, next_gray), labels in zip(pending, label_batches):
             if not labels and not args.keep_empty:
                 skipped_empty += 1
                 previous_gray = next_gray
-                frame_number += 1
                 continue
 
-            timestamp_ms = int((frame_number / source_fps) * 1000) if source_fps else 0
+            timestamp_ms = int((pending_frame_number / source_fps) * 1000) if source_fps else 0
             saved_count += 1
             stem = f"{base}_frame_{saved_count:06d}_{timestamp_ms:010d}ms"
             image_path = images_dir / f"{stem}.jpg"
             label_path = labels_dir / f"{stem}.txt"
 
-            cv2.imwrite(str(image_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpg_quality])
+            cv2.imwrite(str(image_path), pending_frame, [int(cv2.IMWRITE_JPEG_QUALITY), args.jpg_quality])
             label_path.write_text("\n".join(labels) + ("\n" if labels else ""), encoding="utf-8")
             previous_gray = next_gray
-            frame_number += 1
+        pending.clear()
+
+    try:
+        while True:
+            if step > 1:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+            ok, frame = capture.read()
+            if not ok:
+                break
+
+            changed, next_gray = frame_changed(previous_gray, frame, args.min_change)
+            if not changed:
+                skipped_duplicate += 1
+                frame_number += step
+                continue
+
+            pending.append((frame_number, frame, next_gray))
+            if len(pending) >= max(1, args.batch):
+                save_pending()
+            frame_number += step
+        save_pending()
     finally:
         capture.release()
 

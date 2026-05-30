@@ -1,5 +1,6 @@
 import re
 import shutil
+from functools import lru_cache
 from pathlib import Path
 from uuid import UUID
 from uuid import uuid4
@@ -17,6 +18,7 @@ from app.domain.classes import AnnotationTask
 from app.domain.schemas import AnnotationSource, AnnotationStatus
 from app.domain.schemas import (
     DuplicatePolicy,
+    DirectoryEntryRead,
     FrameExtractionCreate,
     ImportSourceType,
     ImportIssue,
@@ -34,6 +36,8 @@ from app.services.yolo_labels import YoloLabelError, parse_label_file
 router = APIRouter()
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
+YOLO_IMAGE_SIZE = 960
+YOLO_BATCH_SIZE = 16
 
 
 @router.get("/item/{media_id}/content")
@@ -89,6 +93,28 @@ def list_import_history(dataset_id: UUID, db: Session = Depends(get_db)) -> list
         .order_by(models.ImportSession.created_at.desc())
     ).all()
     return [import_session_to_read(session) for session in sessions]
+
+
+@router.get("/directories", response_model=DirectoryEntryRead)
+def browse_directories(path: str | None = None) -> DirectoryEntryRead:
+    current = Path(path).expanduser() if path else Path.home()
+    if not current.exists() or not current.is_dir():
+        raise HTTPException(status_code=400, detail="Directory path does not exist on server")
+    try:
+        resolved = current.resolve()
+        directories = sorted(
+            item.name
+            for item in resolved.iterdir()
+            if item.is_dir() and not item.name.startswith(".")
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DirectoryEntryRead(
+        path=str(resolved),
+        name=resolved.name or str(resolved),
+        parent=str(resolved.parent) if resolved.parent != resolved else None,
+        directories=directories,
+    )
 
 
 @router.post("/{dataset_id}/images", response_model=list[MediaRead])
@@ -523,9 +549,15 @@ def auto_annotate_image(
     try:
         from ultralytics import YOLO
 
-        model = YOLO(str(model_path))
+        model = yolo_model(str(model_path))
         image_path = path_for_media(media_item)
-        results = model.predict(str(image_path), verbose=False, device=inference_device())
+        results = model.predict(
+            str(image_path),
+            verbose=False,
+            device=inference_device(),
+            half=inference_half_precision(),
+            imgsz=YOLO_IMAGE_SIZE,
+        )
     except Exception as exc:
         report.issues.append(
             ImportIssue(
@@ -672,6 +704,23 @@ def inference_device() -> str | None:
         return "cuda:0" if torch.cuda.is_available() else None
     except Exception:
         return None
+
+
+def inference_half_precision() -> bool:
+    return inference_device() is not None
+
+
+@lru_cache(maxsize=8)
+def yolo_model(model_path: str):
+    from ultralytics import YOLO
+
+    model = YOLO(model_path)
+    if inference_device() is not None:
+        try:
+            model.to(inference_device())
+        except Exception:
+            pass
+    return model
 
 
 def path_for_media(item: models.MediaItem) -> Path:
@@ -871,45 +920,47 @@ def extract_video_frames(
     video_frame_root = frame_root / frame_folder_name
     video_frame_root.mkdir(parents=True, exist_ok=True)
 
-    while True:
+    total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    while total_frames <= 0 or frame_number < total_frames:
+        if step > 1:
+            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
         ok, frame = capture.read()
         if not ok:
             break
-        if frame_number % step == 0:
-            detections = detect_vehicle_boxes(detector, frame, payload.vehicle_model_key)
-            if not should_save_video_frame(detections, previous_detections):
-                frame_number += 1
-                continue
-            timestamp = frame_number / fps if fps else 0
-            timestamp_ms = int(timestamp * 1000)
-            if timestamp_ms in existing_timestamps:
-                frame_number += 1
-                continue
-            frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
-            frame_path = video_frame_root / frame_name
-            cv2.imwrite(str(frame_path), frame)
-            height, width = frame.shape[:2]
-            frame_item = models.MediaItem(
-                dataset_id=dataset_id,
-                file_name=frame_name,
-                storage_key=f"frames/{dataset_id}/{frame_folder_name}/{frame_name}",
-                media_type=MediaType.IMAGE.value,
-                source_path=str(video_path),
-                import_session_id=import_session_id,
-                parent_media_id=video_item.id,
-                width=int(width),
-                height=int(height),
-                frame_index=saved_index,
-                timestamp_seconds=float(timestamp),
-            )
-            db.add(frame_item)
-            db.flush()
-            frames.append(frame_item)
-            report.imported_frames += 1
-            saved_index += 1
-            existing_timestamps.add(timestamp_ms)
-            previous_detections = detections
-        frame_number += 1
+        detections = detect_vehicle_boxes(detector, frame, payload.vehicle_model_key)
+        if not should_save_video_frame(detections, previous_detections):
+            frame_number += step
+            continue
+        timestamp = frame_number / fps if fps else 0
+        timestamp_ms = int(timestamp * 1000)
+        if timestamp_ms in existing_timestamps:
+            frame_number += step
+            continue
+        frame_name = f"{safe_video_name}_frame_{saved_index + 1:06d}_{timestamp_ms:010d}ms.jpg"
+        frame_path = video_frame_root / frame_name
+        cv2.imwrite(str(frame_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        height, width = frame.shape[:2]
+        frame_item = models.MediaItem(
+            dataset_id=dataset_id,
+            file_name=frame_name,
+            storage_key=f"frames/{dataset_id}/{frame_folder_name}/{frame_name}",
+            media_type=MediaType.IMAGE.value,
+            source_path=str(video_path),
+            import_session_id=import_session_id,
+            parent_media_id=video_item.id,
+            width=int(width),
+            height=int(height),
+            frame_index=saved_index,
+            timestamp_seconds=float(timestamp),
+        )
+        db.add(frame_item)
+        db.flush()
+        frames.append(frame_item)
+        report.imported_frames += 1
+        saved_index += 1
+        existing_timestamps.add(timestamp_ms)
+        previous_detections = detections
+        frame_number += step
 
     capture.release()
     return frames
@@ -927,9 +978,7 @@ def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: Serve
         )
         return None
     try:
-        from ultralytics import YOLO
-
-        return YOLO(str(model_path))
+        return yolo_model(str(model_path))
     except Exception as exc:
         report.issues.append(
             ImportIssue(
@@ -943,7 +992,13 @@ def load_vehicle_frame_detector(payload: ServerFolderImportCreate, report: Serve
 
 def detect_vehicle_boxes(detector, frame, model_key: str | None) -> list[dict[str, float]]:
     try:
-        results = detector.predict(frame, verbose=False, device=inference_device())
+        results = detector.predict(
+            frame,
+            verbose=False,
+            device=inference_device(),
+            half=inference_half_precision(),
+            imgsz=YOLO_IMAGE_SIZE,
+        )
     except Exception:
         return []
 
