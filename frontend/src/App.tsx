@@ -595,12 +595,6 @@ export default function App() {
     if (!media) {
       return;
     }
-    const confirmed = window.confirm(
-      `Delete "${media.fileName}" from the dataset and remove its image/label files from storage?`
-    );
-    if (!confirmed) {
-      return;
-    }
     const nextIndex = Math.min(mediaIndex, Math.max(0, annotatableMedia.length - 2));
     await runWithProgress(`Deleting ${media.fileName}`, async () => {
       await deleteMedia(media.id);
