@@ -80,6 +80,7 @@ export default function App() {
   const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [dirtyMediaIds, setDirtyMediaIds] = useState<Set<string>>(new Set());
 
   const [parentDir, setParentDir] = useState("");
   const [imageDir, setImageDir] = useState("");
@@ -258,6 +259,32 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem("itis.folderAliases", JSON.stringify(folderAliases));
   }, [folderAliases]);
+
+  useEffect(() => {
+    if (dirtyMediaIds.size === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      dirtyMediaIds.forEach((dirtyMediaId) => {
+        const dirtyAnnotations = annotationsByMedia[dirtyMediaId];
+        if (!dirtyAnnotations) {
+          return;
+        }
+        saveAnnotations(dirtyMediaId, dirtyAnnotations)
+          .then((saved) => {
+            setAnnotationsByMedia((current) => ({ ...current, [dirtyMediaId]: saved }));
+            setDirtyMediaIds((current) => {
+              const next = new Set(current);
+              next.delete(dirtyMediaId);
+              return next;
+            });
+            setStatus("Draft saved");
+          })
+          .catch((error) => setStatus(error instanceof Error ? error.message : "Draft save failed"));
+      });
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [annotationsByMedia, dirtyMediaIds]);
 
   function importPayloadIsValid() {
     const scanningImages = activeTab === "images";
@@ -550,6 +577,11 @@ export default function App() {
         items.forEach((item) => delete next[item.id]);
         return next;
       });
+      setDirtyMediaIds((current) => {
+        const next = new Set(current);
+        items.forEach((item) => next.delete(item.id));
+        return next;
+      });
       setSelectedMediaIds((current) => {
         const next = new Set(current);
         items.forEach((item) => next.delete(item.id));
@@ -576,6 +608,11 @@ export default function App() {
       setAnnotationsByMedia((current) => {
         const next = { ...current };
         delete next[media.id];
+        return next;
+      });
+      setDirtyMediaIds((current) => {
+        const next = new Set(current);
+        next.delete(media.id);
         return next;
       });
       setSelectedMediaIds((current) => {
@@ -611,6 +648,11 @@ export default function App() {
       setAnnotationsByMedia((current) => {
         const next = { ...current };
         folder.media.forEach((item) => delete next[item.id]);
+        return next;
+      });
+      setDirtyMediaIds((current) => {
+        const next = new Set(current);
+        folder.media.forEach((item) => next.delete(item.id));
         return next;
       });
       setSelectedMediaIds((current) => {
@@ -651,11 +693,14 @@ export default function App() {
     setSelectedAnnotationId(null);
   }
 
-  function replaceAnnotations(nextAnnotations: Annotation[]) {
+  function replaceAnnotations(nextAnnotations: Annotation[], markDirty = true) {
     if (!media) {
       return;
     }
     setAnnotationsByMedia((current) => ({ ...current, [media.id]: nextAnnotations }));
+    if (markDirty) {
+      setDirtyMediaIds((current) => new Set(current).add(media.id));
+    }
   }
 
   function addAnnotation(annotation: Annotation) {
@@ -810,6 +855,11 @@ export default function App() {
     try {
       const saved = await saveAnnotations(media.id, annotations);
       setAnnotationsByMedia((current) => ({ ...current, [media.id]: saved }));
+      setDirtyMediaIds((current) => {
+        const next = new Set(current);
+        next.delete(media.id);
+        return next;
+      });
       setStatus("Annotations saved");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Save failed");
