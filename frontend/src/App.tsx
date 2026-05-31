@@ -559,6 +559,41 @@ export default function App() {
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Delete failed"));
   }
 
+  async function handleDeleteCurrentMedia() {
+    if (!media) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete "${media.fileName}" from the dataset and remove its image/label files from storage?`
+    );
+    if (!confirmed) {
+      return;
+    }
+    const nextIndex = Math.min(mediaIndex, Math.max(0, annotatableMedia.length - 2));
+    await runWithProgress(`Deleting ${media.fileName}`, async () => {
+      await deleteMedia(media.id);
+      await refreshDataset(datasetId);
+      setAnnotationsByMedia((current) => {
+        const next = { ...current };
+        delete next[media.id];
+        return next;
+      });
+      setSelectedMediaIds((current) => {
+        const next = new Set(current);
+        next.delete(media.id);
+        return next;
+      });
+      setSelectedAnnotationId(null);
+      if (annotatableMedia.length <= 1) {
+        setScreen("home");
+        setMediaIndex(0);
+      } else {
+        setMediaIndex(nextIndex);
+      }
+      setStatus(`Deleted ${media.fileName}`);
+    }).catch((error) => setStatus(error instanceof Error ? error.message : "Delete image failed"));
+  }
+
   async function handleDeleteImportFolder(folder: ScanFolder) {
     if (!datasetId || folder.histories.length === 0) {
       return;
@@ -840,7 +875,7 @@ export default function App() {
             <button title="Accept selected" onClick={acceptSelected}>
               <Check size={18} />
             </button>
-            <button title="Delete selected" onClick={deleteSelected}>
+            <button title="Delete current image" onClick={handleDeleteCurrentMedia} disabled={!media || isProcessing}>
               <Trash2 size={18} />
             </button>
             <button title="AI vehicle suggestions" onClick={() => media && handleAiSuggestion(media, "vehicle")} disabled={!media || isProcessing}>

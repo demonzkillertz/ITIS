@@ -97,7 +97,7 @@ def delete_media_item(media_id: UUID, db: Session = Depends(get_db)) -> Processi
         select(models.MediaItem).where(models.MediaItem.parent_media_id == media_item.id)
     ).all()
     media_ids = [item.id for item in child_items] + [media_item.id]
-    remove_generated_frame_files([*child_items, media_item])
+    remove_media_files([*child_items, media_item])
     db.execute(delete(models.Annotation).where(models.Annotation.media_id.in_(media_ids)))
     db.execute(delete(models.MediaItem).where(models.MediaItem.id.in_(media_ids)))
     db.commit()
@@ -143,7 +143,7 @@ def delete_import_sessions(
         ).all()
         media_items = list({item.id: item for item in [*media_items, *child_items]}.values())
     media_ids = [item.id for item in media_items]
-    remove_generated_frame_files(media_items)
+    remove_media_files(media_items)
     if media_ids:
         db.execute(delete(models.Annotation).where(models.Annotation.media_id.in_(media_ids)))
         db.execute(delete(models.MediaItem).where(models.MediaItem.id.in_(media_ids)))
@@ -877,26 +877,27 @@ def path_for_media(item: models.MediaItem) -> Path:
     return storage_path
 
 
-def remove_generated_frame_files(items: list[models.MediaItem]) -> None:
+def remove_media_files(items: list[models.MediaItem]) -> None:
     storage_root = settings.storage_root.resolve()
     removable_paths: list[Path] = []
     for item in items:
-        if item.media_type != MediaType.IMAGE.value or item.parent_media_id is None:
+        if item.media_type != MediaType.IMAGE.value:
             continue
-        storage_key_path = Path(item.storage_key)
-        if storage_key_path.is_absolute():
+        media_path = path_for_media(item).resolve()
+        if not media_path.exists() or not media_path.is_file():
             continue
-        if not storage_key_path.parts or storage_key_path.parts[0] != "frames":
+        try:
+            media_path.unlink()
+            removable_paths.append(media_path.parent)
+        except OSError:
             continue
-        frame_path = (settings.storage_root / storage_key_path).resolve()
-        if not frame_path.is_relative_to(storage_root):
-            continue
-        if frame_path.exists() and frame_path.is_file():
-            try:
-                frame_path.unlink()
-                removable_paths.append(frame_path.parent)
-            except OSError:
-                continue
+        for label_path in label_sidecar_paths(media_path):
+            if label_path.exists() and label_path.is_file():
+                try:
+                    label_path.unlink()
+                    removable_paths.append(label_path.parent)
+                except OSError:
+                    continue
 
     frame_root = (settings.storage_root / "frames").resolve()
     for directory in sorted(set(removable_paths), key=lambda path: len(path.parts), reverse=True):
@@ -907,6 +908,15 @@ def remove_generated_frame_files(items: list[models.MediaItem]) -> None:
             except OSError:
                 break
             current = current.parent
+
+
+def label_sidecar_paths(image_path: Path) -> list[Path]:
+    candidates = [image_path.with_suffix(".txt")]
+    parent = image_path.parent
+    if parent.name.lower() in {"image", "images"}:
+        for label_dir_name in ("label", "labels"):
+            candidates.append(parent.parent / label_dir_name / f"{image_path.stem}.txt")
+    return list(dict.fromkeys(candidates))
 
 
 def ensure_dataset(db: Session, dataset_id: UUID) -> models.Dataset:
