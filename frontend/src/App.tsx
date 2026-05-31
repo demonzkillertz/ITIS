@@ -105,6 +105,7 @@ export default function App() {
   const [folderMenuKey, setFolderMenuKey] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
   const [galleryFrameLimit, setGalleryFrameLimit] = useState(GALLERY_FRAME_BATCH);
+  const [mediaIndexInput, setMediaIndexInput] = useState("1");
   const [bulkTasks, setBulkTasks] = useState<Record<AnnotationTask, boolean>>({ vehicle: true, plate: true });
   const [directoryPicker, setDirectoryPicker] = useState<{
     target: "parent" | "images" | "videos" | "labels";
@@ -255,6 +256,10 @@ export default function App() {
   useEffect(() => {
     setGalleryFrameLimit(GALLERY_FRAME_BATCH);
   }, [openFolder, activeTab]);
+
+  useEffect(() => {
+    setMediaIndexInput(String(annotatableMedia.length ? mediaIndex + 1 : 0));
+  }, [annotatableMedia.length, mediaIndex]);
 
   useEffect(() => {
     window.localStorage.setItem("itis.folderAliases", JSON.stringify(folderAliases));
@@ -687,6 +692,17 @@ export default function App() {
     setSelectedAnnotationId(null);
   }
 
+  function commitMediaIndexInput() {
+    if (annotatableMedia.length === 0) {
+      setMediaIndexInput("0");
+      return;
+    }
+    const nextIndex = clamp(Math.round(Number(mediaIndexInput) || 1), 1, annotatableMedia.length) - 1;
+    setMediaIndex(nextIndex);
+    setMediaIndexInput(String(nextIndex + 1));
+    setSelectedAnnotationId(null);
+  }
+
   function replaceAnnotations(nextAnnotations: Annotation[], markDirty = true) {
     if (!media) {
       return;
@@ -907,7 +923,18 @@ export default function App() {
               <ChevronLeft size={18} />
             </button>
             <span className="frame-counter">
-              {annotatableMedia.length ? mediaIndex + 1 : 0} / {annotatableMedia.length}
+              <input
+                value={mediaIndexInput}
+                onChange={(event) => setMediaIndexInput(event.target.value)}
+                onBlur={commitMediaIndexInput}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+                aria-label="Current image number"
+              />
+              / {annotatableMedia.length}
             </span>
             <button
               title="Next image"

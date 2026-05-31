@@ -77,7 +77,11 @@
   }
 
   .frame-counter {
-    @apply min-w-[60px] text-center text-slate-300;
+    @apply flex min-w-[92px] items-center justify-center gap-1 text-center text-slate-300;
+  }
+
+  .frame-counter input {
+    @apply h-[34px] w-[54px] rounded-md border border-slate-600 bg-slate-950 px-2 text-center text-slate-100 outline-none focus:border-sky-400;
   }
 
   .workspace,
