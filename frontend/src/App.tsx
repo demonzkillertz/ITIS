@@ -731,13 +731,13 @@ export default function App() {
     }
   }
 
-  function acceptSelected() {
-    if (!selectedAnnotationId) {
+  function acceptAllDrafts() {
+    if (!annotations.some((annotation) => annotation.status === "draft")) {
       return;
     }
     replaceAnnotations(
       annotations.map((annotation) =>
-        annotation.id === selectedAnnotationId
+        annotation.status === "draft"
           ? {
               ...annotation,
               status: "accepted",
@@ -916,7 +916,7 @@ export default function App() {
             >
               <ChevronRight size={18} />
             </button>
-            <button title="Accept selected" onClick={acceptSelected}>
+            <button title="Accept all drafts" onClick={acceptAllDrafts} disabled={!annotations.some((annotation) => annotation.status === "draft")}>
               <Check size={18} />
             </button>
             <button title="Delete current image" onClick={handleDeleteCurrentMedia} disabled={!media || isProcessing}>
