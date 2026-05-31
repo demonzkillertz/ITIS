@@ -9,7 +9,7 @@ from uuid import UUID
 from uuid import uuid4
 
 import cv2
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -61,12 +61,28 @@ def read_media_content(media_id: UUID, db: Session = Depends(get_db)) -> FileRes
 
 
 @router.get("/{dataset_id}/items", response_model=list[MediaRead])
-def list_media_items(dataset_id: UUID, db: Session = Depends(get_db)) -> list[MediaRead]:
+def list_media_items(
+    dataset_id: UUID,
+    media_type: MediaType | None = None,
+    parent_media_id: UUID | None = None,
+    import_session_id: UUID | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int | None = Query(default=None, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> list[MediaRead]:
     ensure_dataset(db, dataset_id)
+    query = select(models.MediaItem).where(models.MediaItem.dataset_id == dataset_id)
+    if media_type is not None:
+        query = query.where(models.MediaItem.media_type == media_type.value)
+    if parent_media_id is not None:
+        query = query.where(models.MediaItem.parent_media_id == parent_media_id)
+    if import_session_id is not None:
+        query = query.where(models.MediaItem.import_session_id == import_session_id)
+    query = query.order_by(models.MediaItem.created_at.asc()).offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
     items = db.scalars(
-        select(models.MediaItem)
-        .where(models.MediaItem.dataset_id == dataset_id)
-        .order_by(models.MediaItem.created_at.asc())
+        query
     ).all()
     return [media_to_read(item) for item in items]
 

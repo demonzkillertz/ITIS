@@ -17,7 +17,7 @@ import {
   Trash2,
   Wand2
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
@@ -60,6 +60,7 @@ type ScanFolder = {
   images: number;
   videos: number;
 };
+const GALLERY_FRAME_BATCH = 60;
 
 export default function App() {
   const navigate = useNavigate();
@@ -102,6 +103,7 @@ export default function App() {
   const [aiMenuKey, setAiMenuKey] = useState<string | null>(null);
   const [folderMenuKey, setFolderMenuKey] = useState<string | null>(null);
   const [selectedFolderKey, setSelectedFolderKey] = useState<string | null>(null);
+  const [galleryFrameLimit, setGalleryFrameLimit] = useState(GALLERY_FRAME_BATCH);
   const [bulkTasks, setBulkTasks] = useState<Record<AnnotationTask, boolean>>({ vehicle: true, plate: true });
   const [directoryPicker, setDirectoryPicker] = useState<{
     target: "parent" | "images" | "videos" | "labels";
@@ -197,10 +199,14 @@ export default function App() {
     () => annotations.filter((annotation) => annotation.source === "import").length,
     [annotations]
   );
-  const visibleFrameIds = useMemo(() => visibleFrames.map((item) => item.id), [visibleFrames]);
+  const visibleFramePage = useMemo(
+    () => visibleFrames.slice(0, galleryFrameLimit),
+    [galleryFrameLimit, visibleFrames]
+  );
+  const visibleFramePageIds = useMemo(() => visibleFramePage.map((item) => item.id), [visibleFramePage]);
   const selectedVisibleCount = useMemo(
-    () => visibleFrameIds.filter((id) => selectedMediaIds.has(id)).length,
-    [selectedMediaIds, visibleFrameIds]
+    () => visibleFramePageIds.filter((id) => selectedMediaIds.has(id)).length,
+    [selectedMediaIds, visibleFramePageIds]
   );
   const bulkProgressPercent = bulkProgress?.total
     ? Math.round((bulkProgress.done / bulkProgress.total) * 100)
@@ -244,6 +250,10 @@ export default function App() {
       })
       .catch((error) => setStatus(error.message));
   }, [annotationsByMedia, media]);
+
+  useEffect(() => {
+    setGalleryFrameLimit(GALLERY_FRAME_BATCH);
+  }, [openFolder, activeTab]);
 
   useEffect(() => {
     window.localStorage.setItem("itis.folderAliases", JSON.stringify(folderAliases));
@@ -448,8 +458,8 @@ export default function App() {
   async function handleBulkAiBoth() {
     const targets = selectedMediaIds.size
       ? annotatableMedia.filter((item) => selectedMediaIds.has(item.id))
-      : visibleFrames.length
-        ? visibleFrames
+      : visibleFramePage.length
+        ? visibleFramePage
         : annotatableMedia;
     await handleBulkAiForTasks(targets, selectedBulkTasks());
   }
@@ -503,8 +513,8 @@ export default function App() {
   function toggleSelectVisibleFrames() {
     setSelectedMediaIds((current) => {
       const next = new Set(current);
-      const allSelected = visibleFrameIds.length > 0 && visibleFrameIds.every((id) => next.has(id));
-      visibleFrameIds.forEach((id) => {
+      const allSelected = visibleFramePageIds.length > 0 && visibleFramePageIds.every((id) => next.has(id));
+      visibleFramePageIds.forEach((id) => {
         if (allSelected) {
           next.delete(id);
         } else {
@@ -1293,8 +1303,8 @@ export default function App() {
               ) : null}
               {visibleFrames.length > 0 ? (
                 <button onClick={toggleSelectVisibleFrames}>
-                  {selectedVisibleCount === visibleFrames.length ? <SquareCheck size={17} /> : <Square size={17} />}
-                  {selectedVisibleCount === visibleFrames.length ? "Clear visible" : "Select visible"}
+                  {selectedVisibleCount === visibleFramePage.length ? <SquareCheck size={17} /> : <Square size={17} />}
+                  {selectedVisibleCount === visibleFramePage.length ? "Clear loaded" : "Select loaded"}
                 </button>
               ) : null}
               <button onClick={() => setAiMenuKey(aiMenuKey === "bulk" ? null : "bulk")} disabled={isProcessing || annotatableMedia.length === 0}>
@@ -1419,12 +1429,12 @@ export default function App() {
                   </div>
                 </div>
               ))}
-              {visibleFrames.map((item) => (
+              {visibleFramePage.map((item) => (
                 <div className={selectedMediaIds.has(item.id) ? "gallery-tile media-card selected" : "gallery-tile media-card"} key={item.id}>
                   <button className="select-overlay" onClick={() => toggleMediaSelection(item.id)} title="Select image">
                     {selectedMediaIds.has(item.id) ? <SquareCheck size={18} /> : <Square size={18} />}
                   </button>
-                  <img src={item.imageUrl} alt={item.fileName} />
+                  <LazyGalleryImage src={item.imageUrl} alt={item.fileName} />
                   <span>{item.fileName}</span>
                   {typeof item.frameIndex === "number" ? <small>Frame {item.frameIndex}</small> : null}
                   <div className="card-actions">
@@ -1459,6 +1469,13 @@ export default function App() {
                 <div className="empty-gallery">No media in this folder</div>
               ) : null}
             </div>
+            {visibleFrames.length > visibleFramePage.length ? (
+              <div className="action-row">
+                <button onClick={() => setGalleryFrameLimit((current) => current + GALLERY_FRAME_BATCH)}>
+                  Load more frames ({visibleFramePage.length} / {visibleFrames.length})
+                </button>
+              </div>
+            ) : null}
             {folderMenu ? (
               <div className="dialog-backdrop" role="dialog" aria-modal="true">
                 <div className="folder-action-dialog">
@@ -1664,6 +1681,39 @@ function FrameStatus({ count }: { count: number }) {
     <small className={count > 0 ? "frame-status ready" : "frame-status empty"}>
       {count > 0 ? `Frames extracted: ${count}` : "Frames not extracted"}
     </small>
+  );
+}
+
+function LazyGalleryImage({ src, alt }: { src: string; alt: string }) {
+  const imageRef = useRef<HTMLImageElement | null>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "240px" }
+    );
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <img
+      ref={imageRef}
+      src={isVisible ? src : undefined}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+    />
   );
 }
 

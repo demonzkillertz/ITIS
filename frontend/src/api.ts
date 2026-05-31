@@ -181,8 +181,33 @@ export async function ensureDataset(): Promise<ApiDataset> {
   });
 }
 
-export async function listMedia(datasetId: string): Promise<MediaSample[]> {
-  const media = await request<ApiMedia[]>(`/api/media/${datasetId}/items`);
+export type MediaListOptions = {
+  mediaType?: "image" | "video";
+  parentMediaId?: string;
+  importSessionId?: string;
+  offset?: number;
+  limit?: number;
+};
+
+export async function listMedia(datasetId: string, options: MediaListOptions = {}): Promise<MediaSample[]> {
+  const params = new URLSearchParams();
+  if (options.mediaType) {
+    params.set("media_type", options.mediaType);
+  }
+  if (options.parentMediaId) {
+    params.set("parent_media_id", options.parentMediaId);
+  }
+  if (options.importSessionId) {
+    params.set("import_session_id", options.importSessionId);
+  }
+  if (typeof options.offset === "number") {
+    params.set("offset", String(options.offset));
+  }
+  if (typeof options.limit === "number") {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const media = await request<ApiMedia[]>(`/api/media/${datasetId}/items${suffix}`);
   return media.map((item) => ({
     id: item.id,
     fileName: item.file_name,
