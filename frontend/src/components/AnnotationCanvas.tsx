@@ -23,16 +23,18 @@ type PixelBox = {
 
 function useImage(url: string) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const nextImage = new window.Image();
-    nextImage.crossOrigin = "anonymous";
     setImage(null);
+    setFailed(false);
     nextImage.src = url;
     nextImage.onload = () => setImage(nextImage);
+    nextImage.onerror = () => setFailed(true);
   }, [url]);
 
-  return image;
+  return { image, failed };
 }
 
 function toPixelBox(box: Box, width: number, height: number): PixelBox {
@@ -62,7 +64,7 @@ export default function AnnotationCanvas({
   onSelectAnnotation,
   onUpdateAnnotation
 }: CanvasProps) {
-  const image = useImage(media.imageUrl);
+  const { image, failed: imageFailed } = useImage(media.imageUrl);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(900);
   const [drawingStart, setDrawingStart] = useState<{ x: number; y: number } | null>(null);
@@ -165,6 +167,16 @@ export default function AnnotationCanvas({
           ) : (
             <Rect width={canvasSize.width} height={canvasSize.height} fill="#17202a" />
           )}
+          {imageFailed ? (
+            <Text
+              x={24}
+              y={24}
+              text="Image could not be loaded"
+              fontSize={16}
+              fill="#f8fafc"
+              listening={false}
+            />
+          ) : null}
         </Layer>
         <Layer>
           {annotations.map((annotation) => {
