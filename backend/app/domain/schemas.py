@@ -88,6 +88,7 @@ class DatasetRead(DatasetCreate):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     image_count: int = 0
     labeled_count: int = 0
+    completed_count: int = 0
 
 
 class ImportIssue(BaseModel):

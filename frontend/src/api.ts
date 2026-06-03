@@ -9,6 +9,7 @@ type ApiDataset = {
   description?: string | null;
   image_count: number;
   labeled_count: number;
+  completed_count: number;
 };
 
 type ApiMedia = {
@@ -179,6 +180,15 @@ export async function ensureDataset(): Promise<ApiDataset> {
       description: "Default dataset created from the annotation UI"
     })
   });
+}
+
+export async function getDataset(datasetId: string): Promise<ApiDataset> {
+  const datasets = await request<ApiDataset[]>("/api/datasets");
+  const dataset = datasets.find((item) => item.id === datasetId);
+  if (!dataset) {
+    throw new Error("Dataset not found");
+  }
+  return dataset;
 }
 
 export type MediaListOptions = {

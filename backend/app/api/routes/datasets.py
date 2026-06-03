@@ -1,13 +1,13 @@
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.db import models
 from app.db.session import get_db
 from app.domain.classes import AnnotationTask
-from app.domain.schemas import DatasetCreate, DatasetRead, ImportReport, ProcessingJobRead
+from app.domain.schemas import AnnotationStatus, DatasetCreate, DatasetRead, ImportReport, ProcessingJobRead
 
 router = APIRouter()
 
@@ -18,7 +18,7 @@ def create_dataset(payload: DatasetCreate, db: Session = Depends(get_db)) -> Dat
     db.add(dataset)
     db.commit()
     db.refresh(dataset)
-    return dataset_to_read(dataset, image_count=0, labeled_count=0)
+    return dataset_to_read(dataset, image_count=0, labeled_count=0, completed_count=0)
 
 
 @router.get("", response_model=list[DatasetRead])
@@ -43,19 +43,45 @@ def get_latest_import_report(dataset_id: UUID) -> ImportReport:
     return ImportReport()
 
 
-def dataset_counts(db: Session, dataset_id: UUID) -> tuple[int, int]:
+def dataset_counts(db: Session, dataset_id: UUID) -> tuple[int, int, int]:
     image_count = db.scalar(
-        select(func.count(models.MediaItem.id)).where(models.MediaItem.dataset_id == dataset_id)
+        select(func.count(models.MediaItem.id)).where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.media_type == "image",
+        )
     )
     labeled_count = db.scalar(
         select(func.count(func.distinct(models.Annotation.media_id)))
         .join(models.MediaItem, models.MediaItem.id == models.Annotation.media_id)
-        .where(models.MediaItem.dataset_id == dataset_id)
+        .where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.media_type == "image",
+        )
     )
-    return int(image_count or 0), int(labeled_count or 0)
+    completed_media = (
+        select(
+            models.Annotation.media_id.label("media_id"),
+            func.sum(case((models.Annotation.status == AnnotationStatus.ACCEPTED, 1), else_=0)).label("accepted_count"),
+            func.sum(case((models.Annotation.status != AnnotationStatus.ACCEPTED, 1), else_=0)).label("open_count"),
+        )
+        .join(models.MediaItem, models.MediaItem.id == models.Annotation.media_id)
+        .where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.media_type == "image",
+        )
+        .group_by(models.Annotation.media_id)
+        .subquery()
+    )
+    completed_count = db.scalar(
+        select(func.count()).select_from(completed_media).where(
+            completed_media.c.accepted_count > 0,
+            completed_media.c.open_count == 0,
+        )
+    )
+    return int(image_count or 0), int(labeled_count or 0), int(completed_count or 0)
 
 
-def dataset_to_read(dataset: models.Dataset, image_count: int, labeled_count: int) -> DatasetRead:
+def dataset_to_read(dataset: models.Dataset, image_count: int, labeled_count: int, completed_count: int) -> DatasetRead:
     return DatasetRead(
         id=dataset.id,
         name=dataset.name,
@@ -63,4 +89,5 @@ def dataset_to_read(dataset: models.Dataset, image_count: int, labeled_count: in
         created_at=dataset.created_at,
         image_count=image_count,
         labeled_count=labeled_count,
+        completed_count=completed_count,
     )

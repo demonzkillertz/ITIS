@@ -29,6 +29,7 @@ import {
   downloadModels,
   ensureDataset,
   extractFrames,
+  getDataset,
   importImageFolder,
   importVideoFolder,
   listAnnotations,
@@ -67,6 +68,7 @@ export default function App() {
   const location = useLocation();
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState("Traffic Annotation Dataset");
+  const [completedImageCount, setCompletedImageCount] = useState(0);
   const [mediaItems, setMediaItems] = useState<MediaSample[]>([]);
   const [screen, setScreen] = useState<"home" | "annotate">("home");
   const [mediaIndex, setMediaIndex] = useState(0);
@@ -228,6 +230,7 @@ export default function App() {
         }
         setDatasetId(dataset.id);
         setDatasetName(dataset.name);
+        setCompletedImageCount(dataset.completed_count);
         setMediaItems(media);
         setImportHistory(history);
         setModelOptions(catalog.models);
@@ -278,6 +281,7 @@ export default function App() {
         saveAnnotations(dirtyMediaId, dirtyAnnotations)
           .then((saved) => {
             setAnnotationsByMedia((current) => ({ ...current, [dirtyMediaId]: saved }));
+            refreshDatasetSummary().catch(() => undefined);
             setDirtyMediaIds((current) => {
               const next = new Set(current);
               next.delete(dirtyMediaId);
@@ -317,12 +321,24 @@ export default function App() {
     if (!nextDatasetId) {
       return;
     }
-    const [media, history] = await Promise.all([
+    const [dataset, media, history] = await Promise.all([
+      getDataset(nextDatasetId),
       listMedia(nextDatasetId),
       listImportHistory(nextDatasetId)
     ]);
+    setDatasetName(dataset.name);
+    setCompletedImageCount(dataset.completed_count);
     setMediaItems(media);
     setImportHistory(history);
+  }
+
+  async function refreshDatasetSummary(nextDatasetId = datasetId) {
+    if (!nextDatasetId) {
+      return;
+    }
+    const dataset = await getDataset(nextDatasetId);
+    setDatasetName(dataset.name);
+    setCompletedImageCount(dataset.completed_count);
   }
 
   async function runWithProgress(label: string, action: () => Promise<void>) {
@@ -865,6 +881,7 @@ export default function App() {
     try {
       const saved = await saveAnnotations(media.id, annotations);
       setAnnotationsByMedia((current) => ({ ...current, [media.id]: saved }));
+      await refreshDatasetSummary();
       setDirtyMediaIds((current) => {
         const next = new Set(current);
         next.delete(media.id);
@@ -1156,6 +1173,10 @@ export default function App() {
               <div>
                 <span>Images/frames</span>
                 <strong>{annotatableMedia.length}</strong>
+              </div>
+              <div>
+                <span>Completely annotated</span>
+                <strong>{completedImageCount}</strong>
               </div>
               <div>
                 <span>Videos</span>
