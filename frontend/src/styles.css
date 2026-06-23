@@ -592,6 +592,156 @@
   .stats {
     @apply mt-[22px] grid grid-cols-3 gap-2;
   }
+
+  /* ── Export panel ─────────────────────────────────────────── */
+
+  .dashboard-hero {
+    @apply grid-cols-2 max-[980px]:grid-cols-1;
+  }
+
+  .export-hero-btn {
+    @apply border-emerald-500 bg-emerald-900/60 hover:border-emerald-300;
+  }
+
+  .export-hero-btn strong {
+    @apply text-emerald-100;
+  }
+
+  .export-hero-btn span {
+    @apply text-emerald-300;
+  }
+
+  .export-panel {
+    @apply mt-3.5 rounded-lg border border-emerald-700 bg-slate-950 p-4 shadow-lg shadow-black/30;
+  }
+
+  .export-panel-title {
+    @apply mb-2 flex items-center gap-2 text-emerald-200;
+  }
+
+  .export-panel-title h2 {
+    @apply flex-1 text-emerald-100;
+  }
+
+  .export-close-btn {
+    @apply grid h-7 w-7 place-items-center rounded-md border border-slate-600 bg-slate-800 text-slate-300 hover:border-red-400 hover:text-red-300;
+  }
+
+  .export-desc {
+    @apply mb-3 text-sm text-slate-400;
+  }
+
+  .export-desc code {
+    @apply rounded bg-slate-800 px-1 py-0.5 font-mono text-xs text-emerald-300;
+  }
+
+  .export-class-guide {
+    @apply mb-3.5 rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-300;
+  }
+
+  .export-class-guide strong {
+    @apply mb-2 block text-slate-50;
+  }
+
+  .export-class-guide ul {
+    @apply m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-1.5 p-0;
+  }
+
+  .export-class-guide li {
+    @apply flex items-center gap-2;
+  }
+
+  .cls-badge {
+    @apply inline-grid h-5 w-5 flex-none place-items-center rounded text-center text-[0.7rem] font-bold text-white;
+  }
+
+  .export-folder-row {
+    @apply mb-3;
+  }
+
+  .export-folder-label {
+    @apply grid gap-1.5 text-[0.82rem] text-blue-100;
+  }
+
+  .export-folder-input-group {
+    @apply flex gap-2;
+  }
+
+  .export-folder-input-group input {
+    @apply h-[38px] flex-1 min-w-0 rounded-md border border-slate-600 bg-slate-800 px-2.5 text-slate-200 outline-none focus:border-emerald-400;
+  }
+
+  .export-folder-input-group button {
+    @apply inline-flex h-[38px] items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-2.5 text-slate-200 hover:border-sky-400;
+  }
+
+  .export-options-row {
+    @apply mb-3 flex flex-wrap items-center gap-3;
+  }
+
+  .export-overwrite-label {
+    @apply flex items-center gap-2 text-sm text-blue-100;
+  }
+
+  .export-overwrite-label input[type="checkbox"] {
+    @apply h-4 w-4 accent-emerald-400;
+  }
+
+  .export-preview-btn {
+    @apply inline-flex h-[34px] items-center gap-1.5 rounded-md border border-slate-600 bg-slate-800 px-3 text-sm text-slate-200 hover:border-sky-400;
+  }
+
+  .export-preview-badge {
+    @apply mb-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-600 bg-emerald-950 px-3 py-1 text-sm text-emerald-200;
+  }
+
+  .export-action-row {
+    @apply mb-3 flex items-center gap-3;
+  }
+
+  .export-submit-btn {
+    @apply inline-flex h-[42px] items-center gap-2 rounded-md border border-emerald-500 bg-emerald-700 px-4 text-white hover:bg-emerald-600;
+  }
+
+  .export-submit-btn:disabled {
+    @apply cursor-not-allowed border-slate-600 bg-slate-800 text-slate-500 opacity-60;
+  }
+
+  .export-status-text {
+    @apply text-sm text-slate-400 animate-pulse;
+  }
+
+  .export-result {
+    @apply rounded-lg border border-emerald-700 bg-emerald-950/40 p-3;
+  }
+
+  .export-result-row {
+    @apply flex items-center justify-between gap-3 rounded-md border border-slate-700 bg-slate-900 p-2.5 mb-2;
+  }
+
+  .export-result-row span {
+    @apply text-sm text-slate-400;
+  }
+
+  .export-result-row strong {
+    @apply text-lg font-bold text-emerald-300;
+  }
+
+  .export-result-path {
+    @apply mb-3 flex items-center gap-2 overflow-x-auto text-xs text-slate-400;
+  }
+
+  .export-file-structure {
+    @apply rounded-md border border-slate-700 bg-slate-950 p-3 text-sm text-slate-300;
+  }
+
+  .export-file-structure strong {
+    @apply mb-2 block text-slate-200;
+  }
+
+  .export-file-structure pre {
+    @apply m-0 overflow-x-auto font-mono text-xs text-slate-400 whitespace-pre;
+  }
 }
 
 @keyframes progress-slide {

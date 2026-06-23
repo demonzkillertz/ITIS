@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.routes import annotations, datasets, media, yolo_models
+from app.api.routes import annotations, datasets, export, media, yolo_models
 from app.core.config import settings
 from app.db.base import Base
 from app.db.models import Annotation, Dataset, DatasetVersion, ImportSession, MediaItem, ProcessingJob
@@ -32,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(media.router, prefix="/api/media", tags=["media"])
     app.include_router(annotations.router, prefix="/api/annotations", tags=["annotations"])
     app.include_router(yolo_models.router, prefix="/api/models", tags=["models"])
+    app.include_router(export.router, prefix="/api/export", tags=["export"])
     app.mount("/storage", StaticFiles(directory=settings.storage_root), name="storage")
 
     @app.get("/health")

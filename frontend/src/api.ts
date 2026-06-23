@@ -664,7 +664,32 @@ export async function deleteImportSessions(datasetId: string, sessionIds: string
   });
 }
 
+export async function previewExport(
+  datasetId: string,
+  outputDir: string
+): Promise<{ qualified: number; output_dir: string }> {
+  const params = new URLSearchParams({ output_dir: outputDir });
+  return request<{ qualified: number; output_dir: string }>(
+    `/api/export/${datasetId}/annotated/preview?${params.toString()}`
+  );
+}
+
+export async function exportAnnotated(
+  datasetId: string,
+  outputDir: string,
+  overwrite: boolean
+): Promise<{ exported: number; skipped: number; output_dir: string }> {
+  return request<{ exported: number; skipped: number; output_dir: string }>(
+    `/api/export/${datasetId}/annotated`,
+    {
+      method: "POST",
+      body: JSON.stringify({ output_dir: outputDir, overwrite })
+    }
+  );
+}
+
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");

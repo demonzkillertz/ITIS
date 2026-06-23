@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Download,
   Film,
   FolderOpen,
   FolderSearch,
@@ -28,6 +29,7 @@ import {
   deleteImportSessions,
   downloadModels,
   ensureDataset,
+  exportAnnotated,
   extractFrames,
   getDataset,
   importImageFolder,
@@ -36,6 +38,7 @@ import {
   listImportHistory,
   listMedia,
   listModels,
+  previewExport,
   saveAnnotations,
   uploadImages
 } from "./api";
@@ -110,9 +113,17 @@ export default function App() {
   const [mediaIndexInput, setMediaIndexInput] = useState("1");
   const [bulkTasks, setBulkTasks] = useState<Record<AnnotationTask, boolean>>({ vehicle: true, plate: true });
   const [directoryPicker, setDirectoryPicker] = useState<{
-    target: "parent" | "images" | "videos" | "labels";
+    target: "parent" | "images" | "videos" | "labels" | "export";
     entry: DirectoryEntry | null;
   } | null>(null);
+
+  // ── Export state ─────────────────────────────────────────────────────────
+  const [exportDir, setExportDir] = useState("");
+  const [exportOverwrite, setExportOverwrite] = useState(false);
+  const [exportPreviewCount, setExportPreviewCount] = useState<number | null>(null);
+  const [exportResult, setExportResult] = useState<{ exported: number; skipped: number; output_dir: string } | null>(null);
+  const [exportPanelOpen, setExportPanelOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const activeTab = tabFromPath(location.pathname);
   const setActiveTab = (tab: "dashboard" | "images" | "videos" | "media" | "history") => {
@@ -796,12 +807,16 @@ export default function App() {
     );
   }
 
-  async function openDirectoryPicker(target: "parent" | "images" | "videos" | "labels") {
+  async function openDirectoryPicker(target: "parent" | "images" | "videos" | "labels" | "export") {
     const currentPath =
-      target === "parent" ? parentDir : target === "images" ? imageDir : target === "videos" ? videoDir : labelDir;
+      target === "parent" ? parentDir
+      : target === "images" ? imageDir
+      : target === "videos" ? videoDir
+      : target === "export" ? exportDir
+      : labelDir;
     setDirectoryPicker({ target, entry: null });
     try {
-      const entry = await browseDirectories(currentPath || parentDir || null);
+      const entry = await browseDirectories(currentPath || (target !== "export" ? parentDir : null) || null);
       setDirectoryPicker({ target, entry });
     } catch (error) {
       setDirectoryPicker(null);
@@ -831,6 +846,16 @@ export default function App() {
       setImageDir(path);
     } else if (directoryPicker.target === "videos") {
       setVideoDir(path);
+    } else if (directoryPicker.target === "export") {
+      setExportDir(path);
+      setExportResult(null);
+      setExportPreviewCount(null);
+      // Auto-preview when folder chosen
+      if (datasetId && path.trim()) {
+        previewExport(datasetId, path.trim())
+          .then((res) => setExportPreviewCount(res.qualified))
+          .catch(() => setExportPreviewCount(null));
+      }
     } else {
       setLabelDir(path);
     }
@@ -902,6 +927,38 @@ export default function App() {
       setModelOptions(catalog.models);
       setStatus(result.message ?? "Models downloaded");
     }).catch((error) => setStatus(error instanceof Error ? error.message : "Model download failed"));
+  }
+
+  async function handleExportPreview() {
+    if (!datasetId || !exportDir.trim()) {
+      setStatus("Enter an output folder path first");
+      return;
+    }
+    try {
+      const res = await previewExport(datasetId, exportDir.trim());
+      setExportPreviewCount(res.qualified);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Preview failed");
+    }
+  }
+
+  async function handleExport() {
+    if (!datasetId || !exportDir.trim()) {
+      setStatus("Enter an output folder path first");
+      return;
+    }
+    setIsExporting(true);
+    setStatus("Exporting annotated images…");
+    setExportResult(null);
+    try {
+      const res = await exportAnnotated(datasetId, exportDir.trim(), exportOverwrite);
+      setExportResult(res);
+      setStatus(`Exported ${res.exported} image${res.exported === 1 ? "" : "s"} to ${res.output_dir}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Export failed");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   function modelSelect(task: "vehicle" | "plate", compact = false) {
@@ -1168,6 +1225,20 @@ export default function App() {
                 <strong>Open Gallery</strong>
                 <span>Review imported images and extracted frames.</span>
               </button>
+              <button
+                className="export-hero-btn"
+                onClick={() => setExportPanelOpen((prev) => !prev)}
+                disabled={completedImageCount === 0}
+                title={completedImageCount === 0 ? "No completely annotated images yet" : "Export annotated dataset"}
+              >
+                <Download size={22} />
+                <strong>Export Dataset</strong>
+                <span>
+                  {completedImageCount > 0
+                    ? `${completedImageCount} image${completedImageCount === 1 ? "" : "s"} ready`
+                    : "No images ready yet"}
+                </span>
+              </button>
             </div>
             <div className="home-stats dashboard-stats">
               <div>
@@ -1191,6 +1262,130 @@ export default function App() {
                 <strong>{status}</strong>
               </div>
             </div>
+            {exportPanelOpen ? (
+              <div className="export-panel">
+                <div className="section-title export-panel-title">
+                  <Download size={18} />
+                  <h2>Export Annotated Dataset</h2>
+                  <button
+                    className="export-close-btn"
+                    onClick={() => { setExportPanelOpen(false); setExportResult(null); }}
+                    title="Close export panel"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <p className="export-desc">
+                  Copies every completely-annotated image (all annotations accepted) together
+                  with its YOLO&nbsp;<code>.txt</code> label file into the chosen server folder.
+                  A&nbsp;<code>classes.txt</code> guide and a&nbsp;<code>data.yaml</code> descriptor
+                  are also written.
+                </p>
+
+                <div className="export-class-guide">
+                  <strong>Class index guide</strong>
+                  <ul>
+                    <li><span className="cls-badge" style={{background:"#0f766e"}}>0</span> number_plate</li>
+                    <li><span className="cls-badge" style={{background:"#1f8a70"}}>1</span> bike</li>
+                    <li><span className="cls-badge" style={{background:"#d95836"}}>2</span> car</li>
+                    <li><span className="cls-badge" style={{background:"#6f5bd7"}}>3</span> bus_microbus</li>
+                    <li><span className="cls-badge" style={{background:"#b7791f"}}>4</span> large_vehicle</li>
+                  </ul>
+                </div>
+
+                <div className="export-folder-row">
+                  <label className="export-folder-label">
+                    <span>Output folder (server path)</span>
+                    <div className="export-folder-input-group">
+                      <input
+                        id="export-output-dir"
+                        value={exportDir}
+                        onChange={(event) => {
+                          setExportDir(event.target.value);
+                          setExportPreviewCount(null);
+                          setExportResult(null);
+                        }}
+                        placeholder="e.g. C:\\datasets\\export"
+                        aria-label="Export output folder path"
+                      />
+                      <button type="button" onClick={() => openDirectoryPicker("export")}>
+                        <FolderOpen size={15} />
+                        Browse
+                      </button>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="export-options-row">
+                  <label className="export-overwrite-label">
+                    <input
+                      type="checkbox"
+                      checked={exportOverwrite}
+                      onChange={(event) => setExportOverwrite(event.target.checked)}
+                      id="export-overwrite"
+                    />
+                    Overwrite existing files
+                  </label>
+                  <button
+                    type="button"
+                    className="export-preview-btn"
+                    onClick={handleExportPreview}
+                    disabled={!exportDir.trim() || isExporting}
+                  >
+                    Preview
+                  </button>
+                </div>
+
+                {exportPreviewCount !== null ? (
+                  <div className="export-preview-badge">
+                    <Check size={15} />
+                    {exportPreviewCount === 0
+                      ? "No completely annotated images found"
+                      : `${exportPreviewCount} image${exportPreviewCount === 1 ? "" : "s"} ready to export`}
+                  </div>
+                ) : null}
+
+                <div className="export-action-row">
+                  <button
+                    id="export-submit-btn"
+                    className="export-submit-btn"
+                    onClick={handleExport}
+                    disabled={!exportDir.trim() || isExporting || completedImageCount === 0}
+                  >
+                    <Download size={17} />
+                    {isExporting ? "Exporting…" : "Export Now"}
+                  </button>
+                  {isExporting ? <span className="export-status-text">Copying files…</span> : null}
+                </div>
+
+                {exportResult ? (
+                  <div className="export-result">
+                    <div className="export-result-row">
+                      <span>Exported</span>
+                      <strong>{exportResult.exported}</strong>
+                    </div>
+                    <div className="export-result-row">
+                      <span>Skipped</span>
+                      <strong>{exportResult.skipped}</strong>
+                    </div>
+                    <div className="export-result-path">
+                      <FolderOpen size={14} />
+                      {exportResult.output_dir}
+                    </div>
+                    <div className="export-file-structure">
+                      <strong>Output structure</strong>
+                      <pre>{`${exportResult.output_dir}
+├── images/      ← annotated image files
+├── labels/      ← YOLO .txt per image
+├── classes.txt  ← class index guide
+└── data.yaml    ← YOLO dataset descriptor`}</pre>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="model-panel">
               <div className="section-title">
                 <Wand2 size={18} />
@@ -1746,7 +1941,7 @@ function DirectoryPickerDialog({
   onChoose,
   onClose
 }: {
-  target: "parent" | "images" | "videos" | "labels";
+  target: "parent" | "images" | "videos" | "labels" | "export";
   entry: DirectoryEntry | null;
   onBrowse: (path: string) => void;
   onChoose: (path: string) => void;
