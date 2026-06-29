@@ -89,6 +89,7 @@ class DatasetRead(DatasetCreate):
     image_count: int = 0
     labeled_count: int = 0
     completed_count: int = 0
+    completed_class_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ImportIssue(BaseModel):

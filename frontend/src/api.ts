@@ -10,6 +10,7 @@ type ApiDataset = {
   image_count: number;
   labeled_count: number;
   completed_count: number;
+  completed_class_counts?: Record<string, number>;
 };
 
 type ApiMedia = {

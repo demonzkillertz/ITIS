@@ -82,6 +82,18 @@ export default function AnnotationCanvas({
     return () => observer.disconnect();
   }, []);
 
+  const annotationIndices = useMemo(() => {
+    const indices: Record<string, number> = {};
+    const result: Record<string, number> = {};
+    // Ensure consistent ordering, for example by id or coordinates, but for now array order is fine.
+    annotations.forEach((ann) => {
+      const current = indices[ann.className] || 0;
+      indices[ann.className] = current + 1;
+      result[ann.id] = indices[ann.className];
+    });
+    return result;
+  }, [annotations]);
+
   const canvasSize = useMemo(() => {
     const maxHeight = 720;
     const scale = Math.min(containerWidth / media.width, maxHeight / media.height);
@@ -213,7 +225,8 @@ export default function AnnotationCanvas({
           {annotations.map((annotation) => {
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
             const color = annotationColor(annotation);
-            const label = `${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
+            const index = annotationIndices[annotation.id];
+            const label = `${annotation.className} ${index}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
             const labelWidth = Math.max(76, label.length * 7 + 10);
             const labelY = Math.max(0, box.y - 23);
             return (

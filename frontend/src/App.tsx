@@ -72,6 +72,7 @@ export default function App() {
   const [datasetId, setDatasetId] = useState<string | null>(null);
   const [datasetName, setDatasetName] = useState("Traffic Annotation Dataset");
   const [completedImageCount, setCompletedImageCount] = useState(0);
+  const [completedClassCounts, setCompletedClassCounts] = useState<Record<string, number>>({});
   const [mediaItems, setMediaItems] = useState<MediaSample[]>([]);
   const [screen, setScreen] = useState<"home" | "annotate">("home");
   const [mediaIndex, setMediaIndex] = useState(0);
@@ -242,6 +243,7 @@ export default function App() {
         setDatasetId(dataset.id);
         setDatasetName(dataset.name);
         setCompletedImageCount(dataset.completed_count);
+        if (dataset.completed_class_counts) setCompletedClassCounts(dataset.completed_class_counts);
         setMediaItems(media);
         setImportHistory(history);
         setModelOptions(catalog.models);
@@ -339,6 +341,7 @@ export default function App() {
     ]);
     setDatasetName(dataset.name);
     setCompletedImageCount(dataset.completed_count);
+    if (dataset.completed_class_counts) setCompletedClassCounts(dataset.completed_class_counts);
     setMediaItems(media);
     setImportHistory(history);
   }
@@ -350,6 +353,7 @@ export default function App() {
     const dataset = await getDataset(nextDatasetId);
     setDatasetName(dataset.name);
     setCompletedImageCount(dataset.completed_count);
+    if (dataset.completed_class_counts) setCompletedClassCounts(dataset.completed_class_counts);
   }
 
   async function runWithProgress(label: string, action: () => Promise<void>) {
@@ -1262,6 +1266,16 @@ export default function App() {
                 <strong>{status}</strong>
               </div>
             </div>
+            {Object.keys(completedClassCounts).length > 0 && (
+              <div className="home-stats dashboard-stats" style={{ marginTop: "1rem" }}>
+                {Object.entries(completedClassCounts).map(([className, count]) => (
+                  <div key={className}>
+                    <span>{className.replace('_', ' ')} (approved)</span>
+                    <strong>{count}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
             {exportPanelOpen ? (
               <div className="export-panel">
                 <div className="section-title export-panel-title">
