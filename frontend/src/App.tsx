@@ -1082,6 +1082,14 @@ export default function App() {
             <button 
               title="Save Boundary" 
               onClick={() => {
+                const existingBoundary = annotations.find(a => a.classId === 10);
+                if (existingBoundary) {
+                  if (!window.confirm("This image already has a boundary. Overwrite it?")) {
+                    return;
+                  }
+                  deleteAnnotation(existingBoundary.id);
+                }
+
                 // Calculate bounding box of the polygon
                 const xs = roiDraft.map(p => p.x);
                 const ys = roiDraft.map(p => p.y);
@@ -1130,6 +1138,10 @@ export default function App() {
                 
                 const targetMediaIds = annotatableMedia.slice(mediaIndex + 1, targetIndex + 1).map(m => m.id);
                 
+                if (!window.confirm(`This will copy the boundary to ${targetMediaIds.length} frames, overwriting any existing boundaries on them. Continue?`)) {
+                  return;
+                }
+                
                 setStatus("Copying boundaries...");
                 try {
                   const result = await copyClassAnnotations(media.id, 10, targetMediaIds);
@@ -1144,6 +1156,24 @@ export default function App() {
               disabled={!(media && annotations.some(a => a.classId === 10))}
             >
               <Copy size={18} />
+            </button>
+            <button 
+              title="Delete Boundary" 
+              onClick={() => {
+                if (window.confirm("Are you sure you want to delete the boundary for this image?")) {
+                  const existingBoundary = annotations.find(a => a.classId === 10);
+                  if (existingBoundary) {
+                    deleteAnnotation(existingBoundary.id);
+                    setStatus("Boundary deleted");
+                  }
+                }
+              }}
+              style={{
+                visibility: (media && annotations.some(a => a.classId === 10)) ? "visible" : "hidden"
+              }}
+              disabled={!(media && annotations.some(a => a.classId === 10))}
+            >
+              <Trash2 size={18} />
             </button>
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
             <button title="Save annotations" onClick={handleSave} disabled={!media || isSaving}>

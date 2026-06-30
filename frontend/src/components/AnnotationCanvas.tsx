@@ -282,7 +282,9 @@ export default function AnnotationCanvas({
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
             const color = annotationColor(annotation);
             const index = annotationIndices[annotation.id];
-            const label = `${index} ${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
+            const label = annotation.classId === 10
+              ? `${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`
+              : `${index} ${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
             const labelWidth = Math.max(76, label.length * 7 + 10);
             const labelY = Math.max(0, box.y - 23);
             return (

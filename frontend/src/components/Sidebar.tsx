@@ -36,7 +36,7 @@ export default function Sidebar({
         <h2>Labels</h2>
       </div>
       <div className="annotation-list">
-        {annotations.map((annotation) => {
+        {annotations.filter(a => a.classId !== 10).map((annotation) => {
           const index = annotationIndices[annotation.id];
           const labelText = `${index} ${annotation.className}`;
           return (
