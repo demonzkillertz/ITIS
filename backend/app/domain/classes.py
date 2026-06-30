@@ -11,6 +11,7 @@ VEHICLE_CLASSES: dict[int, str] = {
     2: "car",
     3: "bus_microbus",
     4: "large_vehicle",
+    10: "Boundary",
 }
 
 PLATE_CLASSES: dict[int, str] = {
