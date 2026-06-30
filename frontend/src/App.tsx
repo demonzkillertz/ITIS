@@ -40,6 +40,7 @@ import {
   listModels,
   previewExport,
   saveAnnotations,
+  getVideoROI,
   saveVideoROI,
   uploadImages
 } from "./api";
