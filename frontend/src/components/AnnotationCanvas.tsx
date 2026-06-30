@@ -55,12 +55,21 @@ function toPixelBox(box: Box, width: number, height: number): PixelBox {
   };
 }
 
+const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
+
 function toNormalizedBox(box: PixelBox, width: number, height: number): Box {
+  const x = clamp(box.x, 0, width);
+  const y = clamp(box.y, 0, height);
+  const right = clamp(box.x + box.width, 0, width);
+  const bottom = clamp(box.y + box.height, 0, height);
+  const newWidth = right - x;
+  const newHeight = bottom - y;
+
   return {
-    xCenter: (box.x + box.width / 2) / width,
-    yCenter: (box.y + box.height / 2) / height,
-    width: box.width / width,
-    height: box.height / height
+    xCenter: clamp((x + newWidth / 2) / width, 0, 1),
+    yCenter: clamp((y + newHeight / 2) / height, 0, 1),
+    width: clamp(newWidth / width, 0, 1),
+    height: clamp(newHeight / height, 0, 1)
   };
 }
 
@@ -191,7 +200,10 @@ export default function AnnotationCanvas({
             const stage = e.target.getStage();
             const pointer = stage?.getPointerPosition();
             if (pointer) {
-              onROIClick({ x: pointer.x / canvasSize.width, y: pointer.y / canvasSize.height });
+              onROIClick({ 
+                x: clamp(pointer.x / canvasSize.width, 0, 1), 
+                y: clamp(pointer.y / canvasSize.height, 0, 1) 
+              });
             }
           }
         }}
