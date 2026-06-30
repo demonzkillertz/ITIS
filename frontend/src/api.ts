@@ -600,6 +600,21 @@ export async function saveAnnotations(mediaId: string, annotations: Annotation[]
   return saved.map(fromApiAnnotation);
 }
 
+export async function copyClassAnnotations(
+  sourceMediaId: string,
+  classId: number,
+  targetCount: number
+): Promise<{ copied_to: number }> {
+  return request<{ copied_to: number }>(`/api/annotations/copy-class`, {
+    method: "POST",
+    body: JSON.stringify({
+      source_media_id: sourceMediaId,
+      class_id: classId,
+      target_count: targetCount
+    })
+  });
+}
+
 export async function extractFrames(
   mediaId: string,
   sampleEverySeconds: number,
@@ -690,12 +705,12 @@ export async function exportAnnotated(
 }
 
 export async function getVideoROI(datasetId: string, videoName: string): Promise<VideoROI | null> {
-  try {
-    return await request<VideoROI>(`/api/datasets/${datasetId}/roi/${videoName}`);
-  } catch (err: any) {
-    if (err.message && err.message.includes("404")) return null;
-    throw err;
+  const response = await fetch(`${API_BASE}/api/datasets/${datasetId}/roi/${videoName}`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error("Failed to fetch Video ROI");
   }
+  return response.json();
 }
 
 export async function saveVideoROI(datasetId: string, videoName: string, polygon: Point[]): Promise<VideoROI> {

@@ -57,6 +57,7 @@ def ensure_runtime_schema() -> None:
         "ALTER TABLE annotations ADD COLUMN IF NOT EXISTS is_prefetched BOOLEAN DEFAULT FALSE",
         "ALTER TABLE annotations ADD COLUMN IF NOT EXISTS reviewed_by_user VARCHAR(120)",
         "ALTER TABLE annotations ADD COLUMN IF NOT EXISTS verified_at TIMESTAMP",
+        "ALTER TABLE annotations ADD COLUMN IF NOT EXISTS polygon JSON",
     ]
     with engine.begin() as connection:
         for statement in statements:

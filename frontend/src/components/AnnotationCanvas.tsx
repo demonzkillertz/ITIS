@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Rect, Stage, Text, Line, Group } from "react-konva";
 
 import { classes } from "../data/sample";
-import type { Annotation, AnnotationClass, Box, MediaSample, VideoROI, Point } from "../types";
+import type { Annotation, AnnotationClass, Box, MediaSample, Point } from "../types";
 
 type CanvasProps = {
   media: MediaSample;
@@ -12,7 +12,6 @@ type CanvasProps = {
   onAddAnnotation: (annotation: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
   onUpdateAnnotation: (annotation: Annotation) => void;
-  roi?: VideoROI | null;
   isDrawingROI?: boolean;
   roiDraft?: Point[];
   onROIClick?: (point: Point) => void;
@@ -67,7 +66,6 @@ export default function AnnotationCanvas({
   onAddAnnotation,
   onSelectAnnotation,
   onUpdateAnnotation,
-  roi,
   isDrawingROI,
   roiDraft,
   onROIClick
@@ -239,6 +237,23 @@ export default function AnnotationCanvas({
               />
             );
           })}
+          {/* Render polygons for annotations that have them */}
+          {annotations.map((annotation) => {
+            if (!annotation.polygon || annotation.polygon.length === 0) return null;
+            const selected = annotation.id === selectedAnnotationId;
+            const color = annotationColor(annotation);
+            return (
+              <Line
+                key={`${annotation.id}-polygon`}
+                points={annotation.polygon.flatMap((p) => [p.x * canvasSize.width, p.y * canvasSize.height])}
+                closed
+                stroke={selected ? "#f8fafc" : color}
+                strokeWidth={selected ? 3 : 2}
+                fill={selected ? `${color}33` : `${color}1f`}
+                listening={false}
+              />
+            );
+          })}
           {annotations.map((annotation) => {
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
             const color = annotationColor(annotation);
@@ -280,16 +295,6 @@ export default function AnnotationCanvas({
               stroke={selectedClass.color}
               strokeWidth={2}
               dash={[6, 4]}
-            />
-          ) : null}
-          {roi && roi.polygon && !isDrawingROI ? (
-            <Line
-              points={roi.polygon.flatMap((p) => [p.x * canvasSize.width, p.y * canvasSize.height])}
-              closed
-              stroke="rgba(255, 0, 0, 0.5)"
-              strokeWidth={3}
-              fill="rgba(255, 0, 0, 0.1)"
-              listening={false}
             />
           ) : null}
           {isDrawingROI && roiDraft && roiDraft.length > 0 ? (

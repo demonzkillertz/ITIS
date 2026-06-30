@@ -40,15 +40,14 @@ import {
   listModels,
   previewExport,
   saveAnnotations,
-  getVideoROI,
-  saveVideoROI,
+  copyClassAnnotations,
   uploadImages
 } from "./api";
 import AnnotationCanvas from "./components/AnnotationCanvas";
 import Sidebar from "./components/Sidebar";
 import { classes } from "./data/sample";
 import type { DirectoryEntry, ImportHistoryItem, ModelOption } from "./api";
-import type { Annotation, AnnotationClass, AnnotationTask, MediaSample, VideoROI, Point } from "./types";
+import type { Annotation, AnnotationClass, AnnotationTask, MediaSample, Point } from "./types";
 
 type ScanResult = {
   image_count: number;
@@ -89,7 +88,6 @@ export default function App() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [dirtyMediaIds, setDirtyMediaIds] = useState<Set<string>>(new Set());
-  const [videoROI, setVideoROI] = useState<VideoROI | null>(null);
   const [isDrawingROI, setIsDrawingROI] = useState(false);
   const [roiDraft, setRoiDraft] = useState<Point[]>([]);
 
@@ -275,21 +273,6 @@ export default function App() {
   }, [annotationsByMedia, media]);
 
   useEffect(() => {
-    if (!media || !datasetId) {
-      setVideoROI(null);
-      return;
-    }
-    let videoName: string | null = null;
-    if (media.fileName.includes("_frame_")) {
-      videoName = media.fileName.split("_frame_")[0];
-    }
-    if (videoName) {
-      getVideoROI(datasetId, videoName)
-        .then((roi) => setVideoROI(roi))
-        .catch(console.error);
-    } else {
-      setVideoROI(null);
-    }
     // Reset drawing state when media changes
     setIsDrawingROI(false);
     setRoiDraft([]);
@@ -1076,21 +1059,57 @@ export default function App() {
               <button 
                 title="Save Boundary" 
                 onClick={() => {
-                  if (datasetId && media) {
-                    const videoName = media.fileName.split("_frame_")[0];
-                    saveVideoROI(datasetId, videoName, roiDraft)
-                      .then((roi) => {
-                        setVideoROI(roi);
-                        setIsDrawingROI(false);
-                        setRoiDraft([]);
-                        setStatus("Boundary saved");
-                      })
-                      .catch((err) => setStatus(err.message));
-                  }
+                  // Calculate bounding box of the polygon
+                  const xs = roiDraft.map(p => p.x);
+                  const ys = roiDraft.map(p => p.y);
+                  const minX = Math.min(...xs);
+                  const maxX = Math.max(...xs);
+                  const minY = Math.min(...ys);
+                  const maxY = Math.max(...ys);
+                  const width = maxX - minX;
+                  const height = maxY - minY;
+                  const xCenter = minX + width / 2;
+                  const yCenter = minY + height / 2;
+
+                  addAnnotation({
+                    id: crypto.randomUUID(),
+                    task: "vehicle", // or match current task
+                    classId: 10,
+                    className: "Boundary",
+                    box: { xCenter, yCenter, width, height },
+                    polygon: roiDraft,
+                    source: "manual",
+                    status: "accepted"
+                  });
+                  
+                  setIsDrawingROI(false);
+                  setRoiDraft([]);
+                  setStatus("Boundary added");
                 }}
                 style={{ backgroundColor: '#2563eb', color: 'white' }}
               >
                 Save Boundary
+              </button>
+            ) : null}
+            {media && annotations.some(a => a.classId === 10) ? (
+              <button 
+                title="Copy Boundary" 
+                onClick={async () => {
+                  const val = window.prompt("How many subsequent frames to copy to?", "10");
+                  if (!val) return;
+                  const targetCount = parseInt(val, 10);
+                  if (isNaN(targetCount) || targetCount <= 0) return;
+                  
+                  setStatus("Copying boundaries...");
+                  try {
+                    const result = await copyClassAnnotations(media.id, 10, targetCount);
+                    setStatus(`Copied boundary to ${result.copied_to} frames`);
+                  } catch (err: any) {
+                    setStatus(err.message);
+                  }
+                }}
+              >
+                Copy Boundary
               </button>
             ) : null}
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
@@ -1130,7 +1149,6 @@ export default function App() {
                 onAddAnnotation={addAnnotation}
                 onSelectAnnotation={setSelectedAnnotationId}
                 onUpdateAnnotation={updateAnnotation}
-                roi={videoROI}
                 isDrawingROI={isDrawingROI}
                 roiDraft={roiDraft}
                 onROIClick={(point) => {

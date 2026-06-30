@@ -62,6 +62,7 @@ class Annotation(Base):
     y_center: Mapped[float] = mapped_column(Float, nullable=False)
     width: Mapped[float] = mapped_column(Float, nullable=False)
     height: Mapped[float] = mapped_column(Float, nullable=False)
+    polygon: Mapped[list[dict[str, float]] | None] = mapped_column(JSON, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float)
     source: Mapped[AnnotationSource] = mapped_column(Enum(AnnotationSource), nullable=False)
     status: Mapped[AnnotationStatus] = mapped_column(Enum(AnnotationStatus), nullable=False)

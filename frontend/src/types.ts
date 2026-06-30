@@ -28,6 +28,7 @@ export type Annotation = {
   isPrefetched?: boolean;
   reviewedByUser?: string | null;
   verifiedAt?: string | null;
+  polygon?: Point[] | null;
 };
 
 export type MediaSample = {

@@ -143,12 +143,28 @@ def _build_data_yaml(output_dir: str) -> str:
     )
 
 
-def _write_label_file(label_path: Path, annotations: list[models.Annotation], roi: models.VideoROI | None) -> None:
+def _write_label_file(label_path: Path, annotations: list[models.Annotation]) -> None:
     lines: list[str] = []
+    
+    boundary = next((a for a in annotations if a.class_id == 10), None)
+    roi_polygon = boundary.polygon if boundary and boundary.polygon else None
+    
+    def is_inside_boundary(x: float, y: float) -> bool:
+        if not boundary:
+            return True
+        if roi_polygon:
+            return point_in_polygon(x, y, roi_polygon)
+        left = boundary.x_center - boundary.width / 2
+        right = boundary.x_center + boundary.width / 2
+        top = boundary.y_center - boundary.height / 2
+        bottom = boundary.y_center + boundary.height / 2
+        return left <= x <= right and top <= y <= bottom
+
     for ann in annotations:
-        if roi and roi.polygon:
-            if not point_in_polygon(ann.x_center, ann.y_center, roi.polygon):
-                continue
+        if ann.class_id == 10:
+            continue  # Don't export the boundary box itself
+        if not is_inside_boundary(ann.x_center, ann.y_center):
+            continue
         lines.append(
             f"{ann.class_id} "
             f"{ann.x_center:.6f} "
@@ -196,9 +212,8 @@ def export_annotated(
     exported = 0
     skipped = 0
 
-    # Fetch all ROIs for this dataset
-    rois = db.scalars(select(models.VideoROI).where(models.VideoROI.dataset_id == dataset_id)).all()
-    roi_map = {roi.video_name: roi for roi in rois}
+    exported = 0
+    skipped = 0
 
     for item in items:
         dest_image = images_dir / item.file_name
@@ -226,9 +241,7 @@ def export_annotated(
             .where(models.Annotation.media_id == item.id)
             .order_by(models.Annotation.created_at.asc())
         ).all()
-        video_name = extract_video_name(item.file_name)
-        roi = roi_map.get(video_name) if video_name else None
-        _write_label_file(dest_label, list(annotations), roi)
+        _write_label_file(dest_label, list(annotations))
         exported += 1
 
     # Write metadata files

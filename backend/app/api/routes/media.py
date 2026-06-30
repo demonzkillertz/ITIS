@@ -725,15 +725,27 @@ def auto_annotate_image(
         ).all()
     ]
 
-    video_name = extract_video_name(media_item.file_name)
-    roi = None
-    if video_name:
-        roi = db.scalar(
-            select(models.VideoROI).where(
-                models.VideoROI.dataset_id == media_item.dataset_id,
-                models.VideoROI.video_name == video_name,
-            )
-        )
+    boundary_annotation = db.scalar(
+        select(models.Annotation).where(
+            models.Annotation.media_id == media_item.id,
+            models.Annotation.class_id == 10
+        ).limit(1)
+    )
+    roi_polygon = boundary_annotation.polygon if boundary_annotation and boundary_annotation.polygon else None
+
+    # Fallback to bounding box if polygon is not defined but boundary annotation exists
+    def is_inside_boundary(x: float, y: float) -> bool:
+        if not boundary_annotation:
+            return True
+        if roi_polygon:
+            return point_in_polygon(x, y, roi_polygon)
+        
+        # Check against bounding box
+        left = boundary_annotation.x_center - boundary_annotation.width / 2
+        right = boundary_annotation.x_center + boundary_annotation.width / 2
+        top = boundary_annotation.y_center - boundary_annotation.height / 2
+        bottom = boundary_annotation.y_center + boundary_annotation.height / 2
+        return left <= x <= right and top <= y <= bottom
 
     for result in results:
         image_width = float(result.orig_shape[1])
@@ -757,9 +769,8 @@ def auto_annotate_image(
                 "width": width / image_width,
                 "height": height / image_height,
             }
-            if roi and roi.polygon:
-                if not point_in_polygon(normalized_box["x_center"], normalized_box["y_center"], roi.polygon):
-                    continue
+            if not is_inside_boundary(normalized_box["x_center"], normalized_box["y_center"]):
+                continue
             if has_duplicate_annotation(existing_boxes, normalized_box):
                 continue
             db.add(

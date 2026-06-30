@@ -76,6 +76,7 @@ class AnnotationCreate(BaseModel):
     task: AnnotationTask
     class_id: int
     box: Box
+    polygon: list[Point] | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     source: AnnotationSource = AnnotationSource.MANUAL
     status: AnnotationStatus = AnnotationStatus.ACCEPTED
@@ -88,6 +89,12 @@ class AnnotationRead(AnnotationCreate):
     id: UUID = Field(default_factory=uuid4)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class CopyClassRequest(BaseModel):
+    source_media_id: UUID
+    class_id: int
+    target_count: int = Field(gt=0)
 
 
 class DatasetCreate(BaseModel):

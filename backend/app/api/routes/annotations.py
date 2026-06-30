@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.db import models
 from app.db.session import get_db
 from app.domain.classes import class_map_for_task
-from app.domain.schemas import AnnotationCreate, AnnotationRead
+from app.domain.schemas import AnnotationCreate, AnnotationRead, CopyClassRequest
 
 router = APIRouter()
 
@@ -54,6 +54,7 @@ def replace_annotations(
             is_prefetched=annotation.is_prefetched,
             reviewed_by_user=annotation.reviewed_by_user,
             verified_at=annotation.verified_at,
+            polygon=[{"x": p.x, "y": p.y} for p in annotation.polygon] if annotation.polygon else None,
             updated_at=datetime.utcnow(),
         )
         db.add(saved_annotation)
@@ -63,6 +64,78 @@ def replace_annotations(
     for annotation in saved:
         db.refresh(annotation)
     return [annotation_to_read(annotation) for annotation in saved]
+
+
+@router.post("/copy-class", response_model=dict[str, int])
+def copy_class_annotations(
+    payload: CopyClassRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    source_media = ensure_media(db, payload.source_media_id)
+    
+    source_annotations = db.scalars(
+        select(models.Annotation)
+        .where(
+            models.Annotation.media_id == source_media.id,
+            models.Annotation.class_id == payload.class_id
+        )
+    ).all()
+
+    if not source_annotations:
+        return {"copied_to": 0}
+
+    # Find target media items
+    query = select(models.MediaItem).where(
+        models.MediaItem.dataset_id == source_media.dataset_id,
+        models.MediaItem.id != source_media.id
+    )
+    
+    if source_media.parent_media_id:
+        query = query.where(
+            models.MediaItem.parent_media_id == source_media.parent_media_id,
+            models.MediaItem.frame_index > source_media.frame_index
+        ).order_by(models.MediaItem.frame_index.asc())
+    else:
+        query = query.where(
+            models.MediaItem.file_name > source_media.file_name
+        ).order_by(models.MediaItem.file_name.asc())
+        
+    target_media_items = db.scalars(query.limit(payload.target_count)).all()
+    
+    copied_count = 0
+    for target in target_media_items:
+        # Delete existing annotations of the same class
+        db.execute(
+            delete(models.Annotation).where(
+                models.Annotation.media_id == target.id,
+                models.Annotation.class_id == payload.class_id
+            )
+        )
+        
+        # Copy annotations
+        for src_ann in source_annotations:
+            new_ann = models.Annotation(
+                media_id=target.id,
+                task=src_ann.task,
+                class_id=src_ann.class_id,
+                x_center=src_ann.x_center,
+                y_center=src_ann.y_center,
+                width=src_ann.width,
+                height=src_ann.height,
+                confidence=src_ann.confidence,
+                source=src_ann.source,
+                status=src_ann.status,
+                is_prefetched=src_ann.is_prefetched,
+                reviewed_by_user=src_ann.reviewed_by_user,
+                verified_at=src_ann.verified_at,
+                polygon=src_ann.polygon,
+                updated_at=datetime.utcnow()
+            )
+            db.add(new_ann)
+        copied_count += 1
+        
+    db.commit()
+    return {"copied_to": copied_count}
 
 
 def ensure_media(db: Session, media_id: UUID) -> models.MediaItem:
@@ -90,6 +163,7 @@ def annotation_to_read(annotation: models.Annotation) -> AnnotationRead:
         is_prefetched=annotation.is_prefetched,
         reviewed_by_user=annotation.reviewed_by_user,
         verified_at=annotation.verified_at,
+        polygon=[{"x": p["x"], "y": p["y"]} for p in annotation.polygon] if annotation.polygon else None,
         created_at=annotation.created_at,
         updated_at=annotation.updated_at,
     )
