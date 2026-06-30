@@ -267,11 +267,19 @@ export default function App() {
       return;
     }
     const currentMediaId = media.id;
-    listAnnotations(media.id)
+    const controller = new AbortController();
+    
+    listAnnotations(media.id, controller.signal)
       .then((items) => {
         setAnnotationsByMedia((current) => ({ ...current, [currentMediaId]: items }));
       })
-      .catch((error) => setStatus(error.message));
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          setStatus(error.message);
+        }
+      });
+      
+    return () => controller.abort();
   }, [annotationsByMedia, media]);
 
   useEffect(() => {
@@ -1057,80 +1065,86 @@ export default function App() {
               <Trash2 size={18} />
             </button>
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
-            {media && media.fileName.includes("_frame_") ? (
-              <button 
-                title={isDrawingROI ? "Cancel drawing boundary" : "Draw Boundary"} 
-                onClick={() => {
-                  setIsDrawingROI(!isDrawingROI);
-                  setRoiDraft([]);
-                }} 
-                style={isDrawingROI ? { backgroundColor: '#475569' } : {}}
-              >
-                {isDrawingROI ? <Square size={18} /> : <Pen size={18} />}
-              </button>
-            ) : null}
-            {isDrawingROI && roiDraft.length >= 3 ? (
-              <button 
-                title="Save Boundary" 
-                onClick={() => {
-                  // Calculate bounding box of the polygon
-                  const xs = roiDraft.map(p => p.x);
-                  const ys = roiDraft.map(p => p.y);
-                  const minX = Math.min(...xs);
-                  const maxX = Math.max(...xs);
-                  const minY = Math.min(...ys);
-                  const maxY = Math.max(...ys);
-                  const width = maxX - minX;
-                  const height = maxY - minY;
-                  const xCenter = minX + width / 2;
-                  const yCenter = minY + height / 2;
+            <button 
+              title={isDrawingROI ? "Cancel drawing boundary" : "Draw Boundary"} 
+              onClick={() => {
+                setIsDrawingROI(!isDrawingROI);
+                setRoiDraft([]);
+              }} 
+              style={{
+                visibility: media && media.fileName.includes("_frame_") ? "visible" : "hidden",
+                ...(isDrawingROI ? { backgroundColor: '#475569' } : {})
+              }}
+              disabled={!(media && media.fileName.includes("_frame_"))}
+            >
+              {isDrawingROI ? <Square size={18} /> : <Pen size={18} />}
+            </button>
+            <button 
+              title="Save Boundary" 
+              onClick={() => {
+                // Calculate bounding box of the polygon
+                const xs = roiDraft.map(p => p.x);
+                const ys = roiDraft.map(p => p.y);
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                const width = maxX - minX;
+                const height = maxY - minY;
+                const xCenter = minX + width / 2;
+                const yCenter = minY + height / 2;
 
-                  addAnnotation({
-                    id: crypto.randomUUID(),
-                    task: "vehicle", // or match current task
-                    classId: 10,
-                    className: "Boundary",
-                    box: { xCenter, yCenter, width, height },
-                    polygon: roiDraft,
-                    source: "manual",
-                    status: "accepted"
-                  });
-                  
-                  setIsDrawingROI(false);
-                  setRoiDraft([]);
-                  setStatus("Boundary added");
-                }}
-                style={{ backgroundColor: '#2563eb', color: 'white' }}
-              >
-                <Check size={18} />
-              </button>
-            ) : null}
-            {media && annotations.some(a => a.classId === 10) ? (
-              <button 
-                title="Copy Boundary" 
-                onClick={async () => {
-                  const val = window.prompt(`Copy boundary up to image number (e.g. ${mediaIndex + 10}):`, String(mediaIndex + 2));
-                  if (!val) return;
-                  const targetIndex = parseInt(val, 10) - 1;
-                  if (isNaN(targetIndex) || targetIndex <= mediaIndex || targetIndex >= annotatableMedia.length) {
-                    alert("Invalid target image number. Must be greater than current image and within bounds.");
-                    return;
-                  }
-                  
-                  const targetMediaIds = annotatableMedia.slice(mediaIndex + 1, targetIndex + 1).map(m => m.id);
-                  
-                  setStatus("Copying boundaries...");
-                  try {
-                    const result = await copyClassAnnotations(media.id, 10, targetMediaIds);
-                    setStatus(`Copied boundary to ${result.copied_to} frames`);
-                  } catch (err: any) {
-                    setStatus(err.message);
-                  }
-                }}
-              >
-                <Copy size={18} />
-              </button>
-            ) : null}
+                addAnnotation({
+                  id: crypto.randomUUID(),
+                  task: "vehicle", // or match current task
+                  classId: 10,
+                  className: "Boundary",
+                  box: { xCenter, yCenter, width, height },
+                  polygon: roiDraft,
+                  source: "manual",
+                  status: "accepted"
+                });
+                
+                setIsDrawingROI(false);
+                setRoiDraft([]);
+                setStatus("Boundary added");
+              }}
+              style={{ 
+                visibility: (isDrawingROI && roiDraft.length >= 3) ? "visible" : "hidden",
+                backgroundColor: '#2563eb', color: 'white' 
+              }}
+              disabled={!(isDrawingROI && roiDraft.length >= 3)}
+            >
+              <Check size={18} />
+            </button>
+            <button 
+              title="Copy Boundary" 
+              onClick={async () => {
+                const val = window.prompt(`Copy boundary up to image number (e.g. ${mediaIndex + 10}):`, String(mediaIndex + 2));
+                if (!val) return;
+                const targetIndex = parseInt(val, 10) - 1;
+                if (isNaN(targetIndex) || targetIndex <= mediaIndex || targetIndex >= annotatableMedia.length) {
+                  alert("Invalid target image number. Must be greater than current image and within bounds.");
+                  return;
+                }
+                
+                const targetMediaIds = annotatableMedia.slice(mediaIndex + 1, targetIndex + 1).map(m => m.id);
+                
+                setStatus("Copying boundaries...");
+                try {
+                  const result = await copyClassAnnotations(media.id, 10, targetMediaIds);
+                  setStatus(`Copied boundary to ${result.copied_to} frames`);
+                } catch (err: any) {
+                  setStatus(err.message);
+                }
+              }}
+              style={{
+                visibility: (media && annotations.some(a => a.classId === 10)) ? "visible" : "hidden"
+              }}
+              disabled={!(media && annotations.some(a => a.classId === 10))}
+            >
+              <Copy size={18} />
+            </button>
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
             <button title="Save annotations" onClick={handleSave} disabled={!media || isSaving}>
               <Save size={18} />

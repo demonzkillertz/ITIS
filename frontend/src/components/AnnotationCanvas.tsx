@@ -32,9 +32,15 @@ function useImage(url: string) {
     const nextImage = new window.Image();
     setImage(null);
     setFailed(false);
-    nextImage.src = url;
     nextImage.onload = () => setImage(nextImage);
     nextImage.onerror = () => setFailed(true);
+    nextImage.src = url;
+
+    return () => {
+      nextImage.onload = null;
+      nextImage.onerror = null;
+      nextImage.src = ""; // This cancels the pending request
+    };
   }, [url]);
 
   return { image, failed };
@@ -125,9 +131,11 @@ export default function AnnotationCanvas({
   }
 
   function startDrawing(event: any) {
+    if (isDrawingROI) return;
     const stage = event.target.getStage();
     const targetClass = event.target.getClassName?.();
-    if (event.target !== stage && targetClass !== "Image") {
+    const targetName = event.target.name?.();
+    if (event.target !== stage && targetClass !== "Image" && targetName !== "polygon-boundary") {
       return;
     }
     const point = pointerPosition(event);
@@ -246,6 +254,7 @@ export default function AnnotationCanvas({
             return (
               <Line
                 key={`${annotation.id}-polygon`}
+                name="polygon-boundary"
                 points={annotation.polygon.flatMap((p) => [p.x * canvasSize.width, p.y * canvasSize.height])}
                 closed
                 stroke={selected ? "#f8fafc" : color}

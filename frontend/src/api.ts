@@ -562,8 +562,8 @@ export async function listImportHistory(datasetId: string): Promise<ImportHistor
   }));
 }
 
-export async function listAnnotations(mediaId: string): Promise<Annotation[]> {
-  const annotations = await request<ApiAnnotation[]>(`/api/annotations/${mediaId}`);
+export async function listAnnotations(mediaId: string, signal?: AbortSignal): Promise<Annotation[]> {
+  const annotations = await request<ApiAnnotation[]>(`/api/annotations/${mediaId}`, { signal });
   return annotations.map(fromApiAnnotation);
 }
 
