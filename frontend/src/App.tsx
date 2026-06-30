@@ -291,6 +291,24 @@ export default function App() {
   }, [folderAliases]);
 
   useEffect(() => {
+    if (screen !== "annotate") return;
+    
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        setMediaIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === "ArrowRight") {
+        setMediaIndex((prev) => Math.min(prev + 1, annotatableMedia.length - 1));
+      }
+    }
+    
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [screen, annotatableMedia.length]);
+
+  useEffect(() => {
     if (dirtyMediaIds.size === 0) {
       return;
     }
