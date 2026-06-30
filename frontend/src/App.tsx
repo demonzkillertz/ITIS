@@ -1133,9 +1133,6 @@ export default function App() {
 
         <main className="annotation-layout">
           <Sidebar
-            classes={classes}
-            selectedClass={selectedClass}
-            onSelectClass={setSelectedClass}
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
             onSelectAnnotation={setSelectedAnnotationId}
@@ -1143,6 +1140,23 @@ export default function App() {
             onDeleteAnnotation={deleteAnnotation}
           />
           <section className="annotation-stage">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
+              {classes.map((annotationClass) => {
+                const isSelected =
+                  annotationClass.id === selectedClass.id && annotationClass.task === selectedClass.task;
+                return (
+                  <button
+                    key={`${annotationClass.task}-${annotationClass.id}`}
+                    className={isSelected ? "class-button active" : "class-button"}
+                    style={{ width: 'auto', minWidth: '120px' }}
+                    onClick={() => setSelectedClass(annotationClass)}
+                  >
+                    <span style={{ backgroundColor: annotationClass.color }} />
+                    {annotationClass.name}
+                  </button>
+                );
+              })}
+            </div>
             <div className="media-meta">
               <strong>{status}</strong>
               <span>

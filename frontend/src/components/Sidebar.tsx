@@ -4,9 +4,6 @@ import { useMemo } from "react";
 import type { Annotation, AnnotationClass } from "../types";
 
 type SidebarProps = {
-  classes: AnnotationClass[];
-  selectedClass: AnnotationClass;
-  onSelectClass: (annotationClass: AnnotationClass) => void;
   annotations: Annotation[];
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string) => void;
@@ -15,9 +12,6 @@ type SidebarProps = {
 };
 
 export default function Sidebar({
-  classes,
-  selectedClass,
-  onSelectClass,
   annotations,
   selectedAnnotationId,
   onSelectAnnotation,
@@ -37,27 +31,6 @@ export default function Sidebar({
 
   return (
     <aside className="left-panel">
-      <div className="panel-heading">
-        <CircleDot size={18} />
-        <h2>Classes</h2>
-      </div>
-      <div className="class-list">
-        {classes.map((annotationClass) => {
-          const isSelected =
-            annotationClass.id === selectedClass.id && annotationClass.task === selectedClass.task;
-          return (
-            <button
-              key={`${annotationClass.task}-${annotationClass.id}`}
-              className={isSelected ? "class-button active" : "class-button"}
-              onClick={() => onSelectClass(annotationClass)}
-            >
-              <span style={{ backgroundColor: annotationClass.color }} />
-              {annotationClass.name}
-            </button>
-          );
-        })}
-      </div>
-
       <div className="panel-heading annotation-heading">
         <ListChecks size={18} />
         <h2>Labels</h2>
