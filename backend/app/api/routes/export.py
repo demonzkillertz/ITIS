@@ -31,6 +31,7 @@ EXPORT_CLASSES: list[tuple[int, str]] = [
     (2, "car"),
     (3, "bus_microbus"),
     (4, "large_vehicle"),
+    (10, "Boundary"),
 ]
 
 CLASSES_TXT = "\n".join(f"{cid} {name}" for cid, name in EXPORT_CLASSES) + "\n"
@@ -161,9 +162,7 @@ def _write_label_file(label_path: Path, annotations: list[models.Annotation]) ->
         return left <= x <= right and top <= y <= bottom
 
     for ann in annotations:
-        if ann.class_id == 10:
-            continue  # Don't export the boundary box itself
-        if not is_inside_boundary(ann.x_center, ann.y_center):
+        if ann.class_id != 10 and not is_inside_boundary(ann.x_center, ann.y_center):
             continue
         lines.append(
             f"{ann.class_id} "
