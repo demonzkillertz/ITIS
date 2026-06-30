@@ -207,6 +207,7 @@ export default function AnnotationCanvas({
         </Layer>
         <Layer>
           {annotations.map((annotation) => {
+            if (annotation.polygon && annotation.polygon.length > 0) return null;
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
             const color = annotationColor(annotation);
             const selected = annotation.id === selectedAnnotationId;
@@ -250,7 +251,9 @@ export default function AnnotationCanvas({
                 stroke={selected ? "#f8fafc" : color}
                 strokeWidth={selected ? 3 : 2}
                 fill={selected ? `${color}33` : `${color}1f`}
-                listening={false}
+                onClick={() => onSelectAnnotation(annotation.id)}
+                onTap={() => onSelectAnnotation(annotation.id)}
+                listening={true}
               />
             );
           })}
@@ -258,7 +261,7 @@ export default function AnnotationCanvas({
             const box = toPixelBox(annotation.box, canvasSize.width, canvasSize.height);
             const color = annotationColor(annotation);
             const index = annotationIndices[annotation.id];
-            const label = `${annotation.className} ${index}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
+            const label = `${index} ${annotation.className}${annotation.confidence ? ` ${Math.round(annotation.confidence * 100)}%` : ""}`;
             const labelWidth = Math.max(76, label.length * 7 + 10);
             const labelY = Math.max(0, box.y - 23);
             return (

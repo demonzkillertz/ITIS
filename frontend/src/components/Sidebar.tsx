@@ -1,4 +1,5 @@
 import { Check, CircleDot, ListChecks, Trash2 } from "lucide-react";
+import { useMemo } from "react";
 
 import type { Annotation, AnnotationClass } from "../types";
 
@@ -23,6 +24,17 @@ export default function Sidebar({
   onAcceptAnnotation,
   onDeleteAnnotation
 }: SidebarProps) {
+  const annotationIndices = useMemo(() => {
+    const indices: Record<string, number> = {};
+    const result: Record<string, number> = {};
+    annotations.forEach((ann) => {
+      const current = indices[ann.className] || 0;
+      indices[ann.className] = current + 1;
+      result[ann.id] = indices[ann.className];
+    });
+    return result;
+  }, [annotations]);
+
   return (
     <aside className="left-panel">
       <div className="panel-heading">
@@ -51,16 +63,19 @@ export default function Sidebar({
         <h2>Labels</h2>
       </div>
       <div className="annotation-list">
-        {annotations.map((annotation) => (
-          <div
-            key={annotation.id}
-            className={
-              annotation.id === selectedAnnotationId ? "annotation-row active" : "annotation-row"
-            }
-          >
-            <button className="annotation-select" onClick={() => onSelectAnnotation(annotation.id)}>
-              <span title={annotation.className}>{annotation.className}</span>
-              <small>
+        {annotations.map((annotation) => {
+          const index = annotationIndices[annotation.id];
+          const labelText = `${index} ${annotation.className}`;
+          return (
+            <div
+              key={annotation.id}
+              className={
+                annotation.id === selectedAnnotationId ? "annotation-row active" : "annotation-row"
+              }
+            >
+              <button className="annotation-select" onClick={() => onSelectAnnotation(annotation.id)}>
+                <span title={labelText}>{labelText}</span>
+                <small>
                 {annotation.isPrefetched ? "prefetch" : annotation.source} / {annotation.status}
               </small>
             </button>
@@ -80,7 +95,7 @@ export default function Sidebar({
               <Trash2 size={15} />
             </button>
           </div>
-        ))}
+        )})}
         {annotations.length === 0 ? <p className="empty-state">No labels</p> : null}
       </div>
     </aside>
