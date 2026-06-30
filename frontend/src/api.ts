@@ -604,14 +604,14 @@ export async function saveAnnotations(mediaId: string, annotations: Annotation[]
 export async function copyClassAnnotations(
   sourceMediaId: string,
   classId: number,
-  targetCount: number
+  targetMediaIds: string[]
 ): Promise<{ copied_to: number }> {
   return request<{ copied_to: number }>(`/api/annotations/copy-class`, {
     method: "POST",
     body: JSON.stringify({
       source_media_id: sourceMediaId,
       class_id: classId,
-      target_count: targetCount
+      target_media_ids: targetMediaIds
     })
   });
 }

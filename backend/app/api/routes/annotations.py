@@ -84,23 +84,9 @@ def copy_class_annotations(
     if not source_annotations:
         return {"copied_to": 0}
 
-    # Find target media items
-    query = select(models.MediaItem).where(
-        models.MediaItem.dataset_id == source_media.dataset_id,
-        models.MediaItem.id != source_media.id
-    )
-    
-    if source_media.parent_media_id:
-        query = query.where(
-            models.MediaItem.parent_media_id == source_media.parent_media_id,
-            models.MediaItem.frame_index > source_media.frame_index
-        ).order_by(models.MediaItem.frame_index.asc())
-    else:
-        query = query.where(
-            models.MediaItem.file_name > source_media.file_name
-        ).order_by(models.MediaItem.file_name.asc())
-        
-    target_media_items = db.scalars(query.limit(payload.target_count)).all()
+    target_media_items = db.scalars(
+        select(models.MediaItem).where(models.MediaItem.id.in_(payload.target_media_ids))
+    ).all()
     
     copied_count = 0
     for target in target_media_items:

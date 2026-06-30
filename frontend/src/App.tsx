@@ -4,6 +4,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   Film,
   FolderOpen,
@@ -12,6 +13,7 @@ import {
   ImagePlus,
   ListChecks,
   MoreHorizontal,
+  Pen,
   Save,
   Square,
   SquareCheck,
@@ -1064,7 +1066,7 @@ export default function App() {
                 }} 
                 style={isDrawingROI ? { backgroundColor: '#475569' } : {}}
               >
-                {isDrawingROI ? "Cancel Boundary" : "Draw Boundary"}
+                {isDrawingROI ? <Square size={18} /> : <Pen size={18} />}
               </button>
             ) : null}
             {isDrawingROI && roiDraft.length >= 3 ? (
@@ -1100,28 +1102,33 @@ export default function App() {
                 }}
                 style={{ backgroundColor: '#2563eb', color: 'white' }}
               >
-                Save Boundary
+                <Check size={18} />
               </button>
             ) : null}
             {media && annotations.some(a => a.classId === 10) ? (
               <button 
                 title="Copy Boundary" 
                 onClick={async () => {
-                  const val = window.prompt("How many subsequent frames to copy to?", "10");
+                  const val = window.prompt(`Copy boundary up to image number (e.g. ${mediaIndex + 10}):`, String(mediaIndex + 2));
                   if (!val) return;
-                  const targetCount = parseInt(val, 10);
-                  if (isNaN(targetCount) || targetCount <= 0) return;
+                  const targetIndex = parseInt(val, 10) - 1;
+                  if (isNaN(targetIndex) || targetIndex <= mediaIndex || targetIndex >= annotatableMedia.length) {
+                    alert("Invalid target image number. Must be greater than current image and within bounds.");
+                    return;
+                  }
+                  
+                  const targetMediaIds = annotatableMedia.slice(mediaIndex + 1, targetIndex + 1).map(m => m.id);
                   
                   setStatus("Copying boundaries...");
                   try {
-                    const result = await copyClassAnnotations(media.id, 10, targetCount);
+                    const result = await copyClassAnnotations(media.id, 10, targetMediaIds);
                     setStatus(`Copied boundary to ${result.copied_to} frames`);
                   } catch (err: any) {
                     setStatus(err.message);
                   }
                 }}
               >
-                Copy Boundary
+                <Copy size={18} />
               </button>
             ) : null}
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />

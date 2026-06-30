@@ -94,7 +94,7 @@ class AnnotationRead(AnnotationCreate):
 class CopyClassRequest(BaseModel):
     source_media_id: UUID
     class_id: int
-    target_count: int = Field(gt=0)
+    target_media_ids: list[UUID]
 
 
 class DatasetCreate(BaseModel):
