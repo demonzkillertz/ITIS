@@ -5,7 +5,8 @@ export const classes: AnnotationClass[] = [
   { id: 1, name: "bike", task: "vehicle", color: "#1f8a70" },
   { id: 2, name: "car", task: "vehicle", color: "#d95836" },
   { id: 3, name: "bus_microbus", task: "vehicle", color: "#6f5bd7" },
-  { id: 4, name: "large_vehicle", task: "vehicle", color: "#b7791f" }
+  { id: 4, name: "large_vehicle", task: "vehicle", color: "#b7791f" },
+  { id: 10, name: "Boundary", task: "vehicle", color: "#475569" }
 ];
 
 export const sampleMedia: MediaSample[] = [

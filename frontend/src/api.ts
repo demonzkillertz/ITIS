@@ -45,6 +45,7 @@ type ApiAnnotation = {
   is_prefetched?: boolean;
   reviewed_by_user?: string | null;
   verified_at?: string | null;
+  polygon?: Point[] | null;
 };
 
 type ApiServerImportResult = {
@@ -767,7 +768,8 @@ function fromApiAnnotation(annotation: ApiAnnotation): Annotation {
     status: annotation.status,
     isPrefetched: annotation.is_prefetched ?? false,
     reviewedByUser: annotation.reviewed_by_user ?? null,
-    verifiedAt: annotation.verified_at ?? null
+    verifiedAt: annotation.verified_at ?? null,
+    polygon: annotation.polygon ?? null
   };
 }
 
@@ -782,7 +784,8 @@ function toApiAnnotation(mediaId: string, annotation: Annotation) {
     status: annotation.status,
     is_prefetched: annotation.isPrefetched ?? false,
     reviewed_by_user: annotation.reviewedByUser ?? null,
-    verified_at: annotation.verifiedAt ?? null
+    verified_at: annotation.verifiedAt ?? null,
+    polygon: annotation.polygon ?? null
   };
 }
 
