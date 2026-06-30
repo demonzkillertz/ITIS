@@ -1140,22 +1140,30 @@ export default function App() {
             onDeleteAnnotation={deleteAnnotation}
           />
           <section className="annotation-stage">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-              {classes.map((annotationClass) => {
-                const isSelected =
-                  annotationClass.id === selectedClass.id && annotationClass.task === selectedClass.task;
-                return (
-                  <button
-                    key={`${annotationClass.task}-${annotationClass.id}`}
-                    className={isSelected ? "class-button active" : "class-button"}
-                    style={{ width: 'auto', minWidth: '120px' }}
-                    onClick={() => setSelectedClass(annotationClass)}
-                  >
-                    <span style={{ backgroundColor: annotationClass.color }} />
-                    {annotationClass.name}
-                  </button>
-                );
-              })}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', marginBottom: '12px', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {classes.map((annotationClass) => {
+                  const isSelected =
+                    annotationClass.id === selectedClass.id && annotationClass.task === selectedClass.task;
+                  return (
+                    <button
+                      key={`${annotationClass.task}-${annotationClass.id}`}
+                      className={isSelected ? "class-button active" : "class-button"}
+                      style={{ width: 'auto', minWidth: '80px', height: '32px', minHeight: '32px', padding: '0 10px', fontSize: '13px' }}
+                      onClick={() => setSelectedClass(annotationClass)}
+                    >
+                      <span style={{ backgroundColor: annotationClass.color, width: '10px', height: '10px' }} />
+                      {annotationClass.name}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: '16px', fontSize: '13px', backgroundColor: '#1e293b', padding: '6px 12px', borderRadius: '6px', border: '1px solid #334155' }}>
+                <div><span style={{color:'#94a3b8', marginRight:'4px'}}>Total:</span> <strong>{annotations.length}</strong></div>
+                <div><span style={{color:'#94a3b8', marginRight:'4px'}}>AI draft:</span> <strong>{annotations.filter((item) => item.source === "model" && item.status === "draft").length}</strong></div>
+                <div><span style={{color:'#94a3b8', marginRight:'4px'}}>Imported:</span> <strong>{importedLabelCount}</strong></div>
+                <div><span style={{color:'#94a3b8', marginRight:'4px'}}>Verified:</span> <strong>{annotations.filter((item) => item.verifiedAt).length}</strong></div>
+              </div>
             </div>
             <div className="media-meta">
               <strong>{status}</strong>
@@ -1188,42 +1196,6 @@ export default function App() {
             )}
           </section>
           <aside className="review-panel annotation-review">
-            <div className="metric-row">
-              <span>Total</span>
-              <strong>{annotations.length}</strong>
-            </div>
-            <div className="metric-row">
-              <span>AI draft</span>
-              <strong>
-                {annotations.filter((item) => item.source === "model" && item.status === "draft").length}
-              </strong>
-            </div>
-            <div className="metric-row">
-              <span>Imported</span>
-              <strong>{importedLabelCount}</strong>
-            </div>
-            <div className="metric-row">
-              <span>Verified</span>
-              <strong>{annotations.filter((item) => item.verifiedAt).length}</strong>
-            </div>
-            {media ? (
-              <div className="ai-action-stack">
-                {modelSelect("vehicle", true)}
-                {modelSelect("plate", true)}
-                <button onClick={() => handleAiSuggestion(media, "vehicle")} disabled={isProcessing}>
-                  <Wand2 size={16} />
-                  AI vehicle
-                </button>
-                <button onClick={() => handleAiSuggestion(media, "plate")} disabled={isProcessing}>
-                  <Wand2 size={16} />
-                  AI plate
-                </button>
-                <button onClick={() => handleAiBoth(media)} disabled={isProcessing}>
-                  <Wand2 size={16} />
-                  AI both
-                </button>
-              </div>
-            ) : null}
             {selectedAnnotation ? (
               <div className="annotation-editor">
                 <h2>Edit selected</h2>
@@ -1256,6 +1228,24 @@ export default function App() {
                     />
                   </label>
                 ))}
+              </div>
+            ) : null}
+            {media ? (
+              <div className="ai-action-stack">
+                {modelSelect("vehicle", true)}
+                {modelSelect("plate", true)}
+                <button onClick={() => handleAiSuggestion(media, "vehicle")} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI vehicle
+                </button>
+                <button onClick={() => handleAiSuggestion(media, "plate")} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI plate
+                </button>
+                <button onClick={() => handleAiBoth(media)} disabled={isProcessing}>
+                  <Wand2 size={16} />
+                  AI both
+                </button>
               </div>
             ) : null}
           </aside>
