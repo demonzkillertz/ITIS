@@ -77,7 +77,7 @@
   }
 
   .frame-counter {
-    @apply flex min-w-[92px] items-center justify-center gap-1 text-center text-slate-300;
+    @apply flex min-w-[92px] items-center justify-center gap-1 whitespace-nowrap text-center text-slate-300;
   }
 
   .frame-counter input {
