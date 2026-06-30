@@ -1054,12 +1054,6 @@ export default function App() {
             <button title="Delete current image" onClick={handleDeleteCurrentMedia} disabled={!media || isProcessing}>
               <Trash2 size={18} />
             </button>
-            <button title="AI vehicle suggestions" onClick={() => media && handleAiSuggestion(media, "vehicle")} disabled={!media || isProcessing}>
-              <Wand2 size={18} />
-            </button>
-            <button title="AI plate suggestions" onClick={() => media && handleAiSuggestion(media, "plate")} disabled={!media || isProcessing}>
-              <Wand2 size={18} />
-            </button>
             <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
             {media && media.fileName.includes("_frame_") ? (
               <button 
