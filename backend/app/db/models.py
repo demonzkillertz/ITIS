@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID as PythonUUID
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, JSON
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -118,3 +118,14 @@ class ImportSession(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     dataset: Mapped[Dataset] = relationship(back_populates="import_sessions")
+
+
+class VideoROI(Base):
+    __tablename__ = "video_rois"
+
+    id: Mapped[PythonUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    dataset_id: Mapped[PythonUUID] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    video_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    polygon: Mapped[list[dict[str, float]]] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

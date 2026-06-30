@@ -40,13 +40,14 @@ import {
   listModels,
   previewExport,
   saveAnnotations,
+  saveVideoROI,
   uploadImages
 } from "./api";
 import AnnotationCanvas from "./components/AnnotationCanvas";
 import Sidebar from "./components/Sidebar";
 import { classes } from "./data/sample";
 import type { DirectoryEntry, ImportHistoryItem, ModelOption } from "./api";
-import type { Annotation, AnnotationClass, AnnotationTask, MediaSample } from "./types";
+import type { Annotation, AnnotationClass, AnnotationTask, MediaSample, VideoROI, Point } from "./types";
 
 type ScanResult = {
   image_count: number;
@@ -87,6 +88,9 @@ export default function App() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [dirtyMediaIds, setDirtyMediaIds] = useState<Set<string>>(new Set());
+  const [videoROI, setVideoROI] = useState<VideoROI | null>(null);
+  const [isDrawingROI, setIsDrawingROI] = useState(false);
+  const [roiDraft, setRoiDraft] = useState<Point[]>([]);
 
   const [parentDir, setParentDir] = useState("");
   const [imageDir, setImageDir] = useState("");
@@ -268,6 +272,27 @@ export default function App() {
       })
       .catch((error) => setStatus(error.message));
   }, [annotationsByMedia, media]);
+
+  useEffect(() => {
+    if (!media || !datasetId) {
+      setVideoROI(null);
+      return;
+    }
+    let videoName: string | null = null;
+    if (media.fileName.includes("_frame_")) {
+      videoName = media.fileName.split("_frame_")[0];
+    }
+    if (videoName) {
+      getVideoROI(datasetId, videoName)
+        .then((roi) => setVideoROI(roi))
+        .catch(console.error);
+    } else {
+      setVideoROI(null);
+    }
+    // Reset drawing state when media changes
+    setIsDrawingROI(false);
+    setRoiDraft([]);
+  }, [media, datasetId]);
 
   useEffect(() => {
     setGalleryFrameLimit(GALLERY_FRAME_BATCH);
@@ -1033,6 +1058,41 @@ export default function App() {
             <button title="AI plate suggestions" onClick={() => media && handleAiSuggestion(media, "plate")} disabled={!media || isProcessing}>
               <Wand2 size={18} />
             </button>
+            <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
+            {media && media.fileName.includes("_frame_") ? (
+              <button 
+                title={isDrawingROI ? "Cancel drawing boundary" : "Draw Boundary"} 
+                onClick={() => {
+                  setIsDrawingROI(!isDrawingROI);
+                  setRoiDraft([]);
+                }} 
+                style={isDrawingROI ? { backgroundColor: '#475569' } : {}}
+              >
+                {isDrawingROI ? "Cancel Boundary" : "Draw Boundary"}
+              </button>
+            ) : null}
+            {isDrawingROI && roiDraft.length >= 3 ? (
+              <button 
+                title="Save Boundary" 
+                onClick={() => {
+                  if (datasetId && media) {
+                    const videoName = media.fileName.split("_frame_")[0];
+                    saveVideoROI(datasetId, videoName, roiDraft)
+                      .then((roi) => {
+                        setVideoROI(roi);
+                        setIsDrawingROI(false);
+                        setRoiDraft([]);
+                        setStatus("Boundary saved");
+                      })
+                      .catch((err) => setStatus(err.message));
+                  }
+                }}
+                style={{ backgroundColor: '#2563eb', color: 'white' }}
+              >
+                Save Boundary
+              </button>
+            ) : null}
+            <div style={{ width: 1, height: 24, backgroundColor: '#334155', margin: '0 8px' }} />
             <button title="Save annotations" onClick={handleSave} disabled={!media || isSaving}>
               <Save size={18} />
             </button>
@@ -1069,6 +1129,14 @@ export default function App() {
                 onAddAnnotation={addAnnotation}
                 onSelectAnnotation={setSelectedAnnotationId}
                 onUpdateAnnotation={updateAnnotation}
+                roi={videoROI}
+                isDrawingROI={isDrawingROI}
+                roiDraft={roiDraft}
+                onROIClick={(point) => {
+                  if (isDrawingROI) {
+                    setRoiDraft([...roiDraft, point]);
+                  }
+                }}
               />
             ) : (
               <div className="empty-canvas">No image selected</div>

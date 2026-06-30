@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import { Image as KonvaImage, Layer, Rect, Stage, Text, Line, Group } from "react-konva";
 
 import { classes } from "../data/sample";
-import type { Annotation, AnnotationClass, Box, MediaSample } from "../types";
+import type { Annotation, AnnotationClass, Box, MediaSample, VideoROI, Point } from "../types";
 
 type CanvasProps = {
   media: MediaSample;
@@ -12,6 +12,10 @@ type CanvasProps = {
   onAddAnnotation: (annotation: Annotation) => void;
   onSelectAnnotation: (id: string | null) => void;
   onUpdateAnnotation: (annotation: Annotation) => void;
+  roi?: VideoROI | null;
+  isDrawingROI?: boolean;
+  roiDraft?: Point[];
+  onROIClick?: (point: Point) => void;
 };
 
 type PixelBox = {
@@ -62,7 +66,11 @@ export default function AnnotationCanvas({
   selectedClass,
   onAddAnnotation,
   onSelectAnnotation,
-  onUpdateAnnotation
+  onUpdateAnnotation,
+  roi,
+  isDrawingROI,
+  roiDraft,
+  onROIClick
 }: CanvasProps) {
   const { image, failed: imageFailed } = useImage(media.imageUrl);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -170,8 +178,17 @@ export default function AnnotationCanvas({
         width={canvasSize.width}
         height={canvasSize.height}
         onMouseDown={startDrawing}
-        onMouseMove={continueDrawing}
         onMouseUp={finishDrawing}
+        onMouseMove={continueDrawing}
+        onClick={(e) => {
+          if (isDrawingROI && onROIClick) {
+            const stage = e.target.getStage();
+            const pointer = stage?.getPointerPosition();
+            if (pointer) {
+              onROIClick({ x: pointer.x / canvasSize.width, y: pointer.y / canvasSize.height });
+            }
+          }
+        }}
       >
         <Layer>
           {image ? (
@@ -263,6 +280,25 @@ export default function AnnotationCanvas({
               stroke={selectedClass.color}
               strokeWidth={2}
               dash={[6, 4]}
+            />
+          ) : null}
+          {roi && roi.polygon && !isDrawingROI ? (
+            <Line
+              points={roi.polygon.flatMap((p) => [p.x * canvasSize.width, p.y * canvasSize.height])}
+              closed
+              stroke="rgba(255, 0, 0, 0.5)"
+              strokeWidth={3}
+              fill="rgba(255, 0, 0, 0.1)"
+              listening={false}
+            />
+          ) : null}
+          {isDrawingROI && roiDraft && roiDraft.length > 0 ? (
+            <Line
+              points={roiDraft.flatMap((p) => [p.x * canvasSize.width, p.y * canvasSize.height])}
+              closed={false}
+              stroke="red"
+              strokeWidth={2}
+              listening={false}
             />
           ) : null}
         </Layer>

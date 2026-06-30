@@ -16,6 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.geometry import point_in_polygon
+from app.core.utils import extract_video_name
 from app.db import models
 from app.db.session import get_db
 from app.domain.schemas import AnnotationStatus, MediaType
@@ -141,9 +143,12 @@ def _build_data_yaml(output_dir: str) -> str:
     )
 
 
-def _write_label_file(label_path: Path, annotations: list[models.Annotation]) -> None:
+def _write_label_file(label_path: Path, annotations: list[models.Annotation], roi: models.VideoROI | None) -> None:
     lines: list[str] = []
     for ann in annotations:
+        if roi and roi.polygon:
+            if not point_in_polygon(ann.x_center, ann.y_center, roi.polygon):
+                continue
         lines.append(
             f"{ann.class_id} "
             f"{ann.x_center:.6f} "
@@ -191,6 +196,10 @@ def export_annotated(
     exported = 0
     skipped = 0
 
+    # Fetch all ROIs for this dataset
+    rois = db.scalars(select(models.VideoROI).where(models.VideoROI.dataset_id == dataset_id)).all()
+    roi_map = {roi.video_name: roi for roi in rois}
+
     for item in items:
         dest_image = images_dir / item.file_name
         dest_label = labels_dir / (Path(item.file_name).stem + ".txt")
@@ -217,7 +226,9 @@ def export_annotated(
             .where(models.Annotation.media_id == item.id)
             .order_by(models.Annotation.created_at.asc())
         ).all()
-        _write_label_file(dest_label, list(annotations))
+        video_name = extract_video_name(item.file_name)
+        roi = roi_map.get(video_name) if video_name else None
+        _write_label_file(dest_label, list(annotations), roi)
         exported += 1
 
     # Write metadata files

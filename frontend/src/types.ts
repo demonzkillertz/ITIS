@@ -43,3 +43,15 @@ export type MediaSample = {
   parentMediaId?: string;
   sourcePath?: string;
 };
+
+export type Point = {
+  x: number;
+  y: number;
+};
+
+export type VideoROI = {
+  id?: string;
+  dataset_id?: string;
+  video_name: string;
+  polygon: Point[];
+};

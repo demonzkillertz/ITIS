@@ -3,16 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
-from app.api.routes import annotations, datasets, export, media, yolo_models
+from app.api.routes import annotations, datasets, export, media, yolo_models, roi
 from app.core.config import settings
 from app.db.base import Base
-from app.db.models import Annotation, Dataset, DatasetVersion, ImportSession, MediaItem, ProcessingJob
+from app.db.models import Annotation, Dataset, DatasetVersion, ImportSession, MediaItem, ProcessingJob, VideoROI
 from app.db.session import engine
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name)
-    _ = (Annotation, Dataset, DatasetVersion, ImportSession, MediaItem, ProcessingJob)
+    _ = (Annotation, Dataset, DatasetVersion, ImportSession, MediaItem, ProcessingJob, VideoROI)
     settings.storage_root.mkdir(parents=True, exist_ok=True)
     (settings.storage_root / "uploads").mkdir(parents=True, exist_ok=True)
     (settings.storage_root / "frames").mkdir(parents=True, exist_ok=True)
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(annotations.router, prefix="/api/annotations", tags=["annotations"])
     app.include_router(yolo_models.router, prefix="/api/models", tags=["models"])
     app.include_router(export.router, prefix="/api/export", tags=["export"])
+    app.include_router(roi.router, prefix="/api/datasets", tags=["roi"])
     app.mount("/storage", StaticFiles(directory=settings.storage_root), name="storage")
 
     @app.get("/health")

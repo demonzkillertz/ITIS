@@ -54,6 +54,23 @@ class Box(BaseModel):
     height: float = Field(gt=0, le=1)
 
 
+class Point(BaseModel):
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
+class VideoROICreate(BaseModel):
+    video_name: str
+    polygon: list[Point] = Field(min_length=3)
+
+
+class VideoROIRead(VideoROICreate):
+    id: UUID
+    dataset_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 class AnnotationCreate(BaseModel):
     media_id: UUID
     task: AnnotationTask

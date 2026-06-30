@@ -15,9 +15,11 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.geometry import point_in_polygon
+from app.core.utils import extract_video_name
 from app.db import models
 from app.db.session import SessionLocal, get_db
-from app.domain.classes import AnnotationTask
+from app.domain.classes import AnnotationTask, class_map_for_task
 from app.domain.schemas import AnnotationSource, AnnotationStatus
 from app.domain.schemas import (
     DuplicatePolicy,
@@ -723,6 +725,16 @@ def auto_annotate_image(
         ).all()
     ]
 
+    video_name = extract_video_name(media_item.file_name)
+    roi = None
+    if video_name:
+        roi = db.scalar(
+            select(models.VideoROI).where(
+                models.VideoROI.dataset_id == media_item.dataset_id,
+                models.VideoROI.video_name == video_name,
+            )
+        )
+
     for result in results:
         image_width = float(result.orig_shape[1])
         image_height = float(result.orig_shape[0])
@@ -745,6 +757,9 @@ def auto_annotate_image(
                 "width": width / image_width,
                 "height": height / image_height,
             }
+            if roi and roi.polygon:
+                if not point_in_polygon(normalized_box["x_center"], normalized_box["y_center"], roi.polygon):
+                    continue
             if has_duplicate_annotation(existing_boxes, normalized_box):
                 continue
             db.add(

@@ -1,5 +1,5 @@
 import { classes } from "./data/sample";
-import type { Annotation, AnnotationClass, AnnotationTask, Box, MediaSample } from "./types";
+import type { Annotation, AnnotationClass, AnnotationTask, Box, MediaSample, ProcessingJobRead, VideoROI, Point } from "./types";
 
 const API_BASE = backendBaseUrl();
 
@@ -678,7 +678,7 @@ export async function previewExport(
 export async function exportAnnotated(
   datasetId: string,
   outputDir: string,
-  overwrite: boolean
+  overwrite: boolean = false
 ): Promise<{ exported: number; skipped: number; output_dir: string }> {
   return request<{ exported: number; skipped: number; output_dir: string }>(
     `/api/export/${datasetId}/annotated`,
@@ -687,6 +687,22 @@ export async function exportAnnotated(
       body: JSON.stringify({ output_dir: outputDir, overwrite })
     }
   );
+}
+
+export async function getVideoROI(datasetId: string, videoName: string): Promise<VideoROI | null> {
+  try {
+    return await request<VideoROI>(`/api/datasets/${datasetId}/roi/${videoName}`);
+  } catch (err: any) {
+    if (err.message && err.message.includes("404")) return null;
+    throw err;
+  }
+}
+
+export async function saveVideoROI(datasetId: string, videoName: string, polygon: Point[]): Promise<VideoROI> {
+  return request<VideoROI>(`/api/datasets/${datasetId}/roi/${videoName}`, {
+    method: "PUT",
+    body: JSON.stringify({ video_name: videoName, polygon })
+  });
 }
 
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
