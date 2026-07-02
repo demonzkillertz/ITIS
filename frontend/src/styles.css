@@ -143,14 +143,6 @@
     @apply rounded-lg border border-slate-700 bg-slate-950 p-3;
   }
 
-  .pending-indices-wrap {
-    @apply flex flex-wrap gap-1.5 max-h-[200px] overflow-y-auto;
-  }
-
-  .pending-index-btn {
-    @apply grid h-[30px] min-w-[40px] place-items-center rounded border border-amber-700/50 bg-amber-900/30 px-1.5 text-xs font-medium text-amber-300 transition-colors hover:border-amber-500 hover:bg-amber-800/50 hover:text-amber-100;
-  }
-
   .model-panel {
     @apply mt-3.5 rounded-lg border border-slate-600 bg-slate-950 p-3;
   }

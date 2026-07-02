@@ -1443,20 +1443,24 @@ export default function App() {
                     Pending Annotation — {pendingImages.pending_count} of {pendingImages.total} images left
                   </h2>
                 </div>
-                <div className="pending-indices-wrap">
-                  {pendingImages.pending_indices.map((serialNum) => (
-                    <button
-                      key={serialNum}
-                      className="pending-index-btn"
-                      title={`Go to image #${serialNum}`}
-                      onClick={() => {
-                        setMediaIndex(serialNum - 1);
-                        setScreen("annotate");
-                        navigate("/media");
-                      }}
-                    >
-                      {serialNum}
-                    </button>
+                <div className="pending-indices-wrap" style={{ lineHeight: "1.6", color: "#94a3b8", fontSize: "0.9rem", maxHeight: "250px", overflowY: "auto" }}>
+                  {pendingImages.pending_indices.map((serialNum, idx) => (
+                    <span key={serialNum}>
+                      <button
+                        style={{ color: "#38bdf8", cursor: "pointer", background: "transparent", border: "none", padding: 0, font: "inherit" }}
+                        title={`Go to image #${serialNum}`}
+                        onClick={() => {
+                          setMediaIndex(serialNum - 1);
+                          setScreen("annotate");
+                          navigate("/media");
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                        onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                      >
+                        {serialNum}
+                      </button>
+                      {idx < pendingImages.pending_indices.length - 1 ? ", " : ""}
+                    </span>
                   ))}
                 </div>
               </div>
