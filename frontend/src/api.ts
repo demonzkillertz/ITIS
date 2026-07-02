@@ -721,6 +721,16 @@ export async function saveVideoROI(datasetId: string, videoName: string, polygon
   });
 }
 
+export type PendingImages = {
+  total: number;
+  pending_count: number;
+  pending_indices: number[];
+};
+
+export async function fetchPendingImages(datasetId: string): Promise<PendingImages> {
+  return request<PendingImages>(`/api/datasets/${datasetId}/pending-images`);
+}
+
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
   const headers = new Headers(init.headers);

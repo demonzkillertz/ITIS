@@ -4,10 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel as PydanticBaseModel
 from app.db import models
 from app.db.session import get_db
 from app.domain.classes import AnnotationTask, class_map_for_task
-from app.domain.schemas import AnnotationStatus, DatasetCreate, DatasetRead, ImportReport, ProcessingJobRead
+from app.domain.schemas import AnnotationStatus, DatasetCreate, DatasetRead, ImportReport, MediaType, ProcessingJobRead
 
 router = APIRouter()
 
@@ -108,4 +109,59 @@ def dataset_to_read(dataset: models.Dataset, image_count: int, labeled_count: in
         labeled_count=labeled_count,
         completed_count=completed_count,
         completed_class_counts=completed_class_counts,
+    )
+
+
+class PendingImagesRead(PydanticBaseModel):
+    total: int
+    pending_count: int
+    pending_indices: list[int]
+
+
+@router.get("/{dataset_id}/pending-images", response_model=PendingImagesRead)
+def get_pending_images(dataset_id: UUID, db: Session = Depends(get_db)) -> PendingImagesRead:
+    """Return 1-indexed serial numbers of images that are NOT fully annotated."""
+    # Get all image media items in order (same order as the frontend list)
+    all_images = db.scalars(
+        select(models.MediaItem)
+        .where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.media_type == MediaType.IMAGE.value,
+        )
+        .order_by(models.MediaItem.created_at.asc())
+    ).all()
+
+    # Get the set of completed media IDs (all annotations accepted, at least one exists)
+    completed_sub = (
+        select(
+            models.Annotation.media_id.label("media_id"),
+            func.sum(case((models.Annotation.status == AnnotationStatus.ACCEPTED, 1), else_=0)).label("accepted"),
+            func.sum(case((models.Annotation.status != AnnotationStatus.ACCEPTED, 1), else_=0)).label("open"),
+        )
+        .join(models.MediaItem, models.MediaItem.id == models.Annotation.media_id)
+        .where(
+            models.MediaItem.dataset_id == dataset_id,
+            models.MediaItem.media_type == MediaType.IMAGE.value,
+        )
+        .group_by(models.Annotation.media_id)
+        .subquery()
+    )
+    completed_ids_result = db.execute(
+        select(completed_sub.c.media_id).where(
+            completed_sub.c.accepted > 0,
+            completed_sub.c.open == 0,
+        )
+    ).all()
+    completed_ids = {row[0] for row in completed_ids_result}
+
+    # Build pending indices (1-indexed)
+    pending_indices = []
+    for idx, item in enumerate(all_images):
+        if item.id not in completed_ids:
+            pending_indices.append(idx + 1)  # 1-indexed
+
+    return PendingImagesRead(
+        total=len(all_images),
+        pending_count=len(pending_indices),
+        pending_indices=pending_indices,
     )

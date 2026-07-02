@@ -33,6 +33,7 @@ import {
   ensureDataset,
   exportAnnotated,
   extractFrames,
+  fetchPendingImages,
   getDataset,
   importImageFolder,
   importVideoFolder,
@@ -48,7 +49,7 @@ import {
 import AnnotationCanvas from "./components/AnnotationCanvas";
 import Sidebar from "./components/Sidebar";
 import { classes } from "./data/sample";
-import type { DirectoryEntry, ImportHistoryItem, ModelOption } from "./api";
+import type { DirectoryEntry, ImportHistoryItem, ModelOption, PendingImages } from "./api";
 import type { Annotation, AnnotationClass, AnnotationTask, MediaSample, Point } from "./types";
 
 type ScanResult = {
@@ -76,6 +77,7 @@ export default function App() {
   const [datasetName, setDatasetName] = useState("Traffic Annotation Dataset");
   const [completedImageCount, setCompletedImageCount] = useState(0);
   const [completedClassCounts, setCompletedClassCounts] = useState<Record<string, number>>({});
+  const [pendingImages, setPendingImages] = useState<PendingImages | null>(null);
   const [mediaItems, setMediaItems] = useState<MediaSample[]>([]);
   const [screen, setScreen] = useState<"home" | "annotate">("home");
   const [mediaIndex, setMediaIndex] = useState(0);
@@ -255,6 +257,7 @@ export default function App() {
         setVehicleModelKey(catalog.vehicleDefault);
         setPlateModelKey(catalog.plateDefault);
         setStatus(media.length ? "Dataset loaded" : "No imported media");
+        fetchPendingImages(dataset.id).then(setPendingImages).catch(() => {});
       })
       .catch((error) => setStatus(error.message));
     return () => {
@@ -381,6 +384,7 @@ export default function App() {
     if (dataset.completed_class_counts) setCompletedClassCounts(dataset.completed_class_counts);
     setMediaItems(media);
     setImportHistory(history);
+    fetchPendingImages(nextDatasetId).then(setPendingImages).catch(() => {});
   }
 
   async function refreshDatasetSummary(nextDatasetId = datasetId) {
@@ -391,6 +395,7 @@ export default function App() {
     setDatasetName(dataset.name);
     setCompletedImageCount(dataset.completed_count);
     if (dataset.completed_class_counts) setCompletedClassCounts(dataset.completed_class_counts);
+    fetchPendingImages(nextDatasetId).then(setPendingImages).catch(() => {});
   }
 
   async function runWithProgress(label: string, action: () => Promise<void>) {
@@ -1428,6 +1433,32 @@ export default function App() {
                     <strong>{count}</strong>
                   </div>
                 ))}
+              </div>
+            )}
+            {pendingImages && pendingImages.pending_count > 0 && (
+              <div className="pending-images-section" style={{ marginTop: "1rem" }}>
+                <div className="section-title" style={{ marginBottom: "0.5rem" }}>
+                  <ListChecks size={18} />
+                  <h2 style={{ fontSize: "0.95rem" }}>
+                    Pending Annotation — {pendingImages.pending_count} of {pendingImages.total} images left
+                  </h2>
+                </div>
+                <div className="pending-indices-wrap">
+                  {pendingImages.pending_indices.map((serialNum) => (
+                    <button
+                      key={serialNum}
+                      className="pending-index-btn"
+                      title={`Go to image #${serialNum}`}
+                      onClick={() => {
+                        setMediaIndex(serialNum - 1);
+                        setScreen("annotate");
+                        navigate("/media");
+                      }}
+                    >
+                      {serialNum}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {exportPanelOpen ? (
